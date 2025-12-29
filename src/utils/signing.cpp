@@ -16,32 +16,43 @@ namespace crypto {
     std::vector<uint8_t> encodeTypedData(const nlohmann::json& typed_data);
 }
 
-// Helper function to pack JSON to msgpack
-static void packJson(msgpack::packer<std::stringstream>& packer, const nlohmann::json& j) {
+// Helper function to pack JSON to msgpack (works with both json and ordered_json)
+template<typename JsonType>
+static void packJsonImpl(msgpack::packer<std::stringstream>& packer, const JsonType& j) {
     if (j.is_null()) {
         packer.pack_nil();
     } else if (j.is_boolean()) {
-        packer.pack(j.get<bool>());
+        packer.pack(j.template get<bool>());
     } else if (j.is_number_integer()) {
-        packer.pack(j.get<int64_t>());
+        packer.pack(j.template get<int64_t>());
     } else if (j.is_number_unsigned()) {
-        packer.pack(j.get<uint64_t>());
+        packer.pack(j.template get<uint64_t>());
     } else if (j.is_number_float()) {
-        packer.pack(j.get<double>());
+        packer.pack(j.template get<double>());
     } else if (j.is_string()) {
-        packer.pack(j.get<std::string>());
+        packer.pack(j.template get<std::string>());
     } else if (j.is_array()) {
         packer.pack_array(j.size());
         for (const auto& item : j) {
-            packJson(packer, item);
+            packJsonImpl(packer, item);
         }
     } else if (j.is_object()) {
         packer.pack_map(j.size());
+        // ordered_json preserves insertion order when iterating
         for (auto it = j.begin(); it != j.end(); ++it) {
             packer.pack(it.key());
-            packJson(packer, it.value());
+            packJsonImpl(packer, it.value());
         }
     }
+}
+
+// Wrapper functions for different JSON types
+static void packJson(msgpack::packer<std::stringstream>& packer, const nlohmann::json& j) {
+    packJsonImpl(packer, j);
+}
+
+static void packJson(msgpack::packer<std::stringstream>& packer, const nlohmann::ordered_json& j) {
+    packJsonImpl(packer, j);
 }
 
 // Wallet implementation
@@ -69,7 +80,7 @@ Signature Wallet::signMessage(const std::vector<uint8_t>& message_hash) const {
 
 // Action hash computation
 
-std::vector<uint8_t> actionHash(const nlohmann::json& action,
+std::vector<uint8_t> actionHash(const nlohmann::ordered_json& action,
                                 const std::optional<std::string>& vault_address,
                                 int64_t nonce,
                                 std::optional<int64_t> expires_after) {
@@ -163,11 +174,22 @@ nlohmann::json userSignedPayload(const std::string& primary_type,
         types_array.push_back(type.toJson());
     }
 
+    // Extract chain ID from action's signatureChainId field
+    if (!action.contains("signatureChainId")) {
+        throw std::runtime_error("Action must contain signatureChainId field");
+    }
+    std::string chain_id_hex = action["signatureChainId"].get<std::string>();
+    // Remove "0x" prefix if present
+    if (chain_id_hex.substr(0, 2) == "0x") {
+        chain_id_hex = chain_id_hex.substr(2);
+    }
+    int64_t chain_id = std::stoll(chain_id_hex, nullptr, 16);
+
     nlohmann::json payload = {
         {"domain", {
             {"name", "HyperliquidSignTransaction"},
             {"version", "1"},
-            {"chainId", 0x66eee},  // Fixed chain ID for user-signed actions
+            {"chainId", chain_id},
             {"verifyingContract", "0x0000000000000000000000000000000000000000"}
         }},
         {"primaryType", primary_type},
@@ -189,7 +211,7 @@ nlohmann::json userSignedPayload(const std::string& primary_type,
 // Sign L1 action
 
 Signature signL1Action(const Wallet& wallet,
-                      const nlohmann::json& action,
+                      const nlohmann::ordered_json& action,
                       const std::optional<std::string>& vault_address,
                       int64_t nonce,
                       std::optional<int64_t> expires_after,
@@ -217,7 +239,8 @@ Signature signUserSignedAction(const Wallet& wallet,
                                const std::vector<EIP712Type>& payload_types,
                                const std::string& primary_type,
                                bool is_mainnet) {
-    // Add hyperliquidChain to action
+    // Add signatureChainId and hyperliquidChain to action
+    action["signatureChainId"] = "0x66eee";
     action["hyperliquidChain"] = is_mainnet ? "Mainnet" : "Testnet";
 
     // Create EIP-712 payload
@@ -265,25 +288,26 @@ OrderWire orderRequestToOrderWire(const OrderRequest& order, int asset) {
 
 // Create order action
 
-nlohmann::json orderWiresToOrderAction(const std::vector<OrderWire>& order_wires,
-                                      const std::optional<BuilderInfo>& builder,
-                                      const std::string& grouping) {
-    nlohmann::json orders_array = nlohmann::json::array();
+nlohmann::ordered_json orderWiresToOrderAction(const std::vector<OrderWire>& order_wires,
+                                              const std::optional<BuilderInfo>& builder,
+                                              const std::string& grouping) {
+    nlohmann::ordered_json orders_array = nlohmann::ordered_json::array();
     for (const auto& wire : order_wires) {
-        orders_array.push_back(wire.toJson());
+        nlohmann::ordered_json wire_ordered(wire.toJson());
+        orders_array.push_back(std::move(wire_ordered));
     }
 
-    nlohmann::json action = {
-        {"type", "order"},
-        {"orders", orders_array},
-        {"grouping", grouping}
-    };
+    // Use ordered_json and insert keys in the correct order
+    nlohmann::ordered_json action;
+    action["type"] = "order";
+    action["orders"] = orders_array;
+    action["grouping"] = grouping;
 
     if (builder.has_value()) {
-        action["builder"] = {
-            {"b", builder->b},
-            {"f", builder->f}
-        };
+        nlohmann::ordered_json builder_obj;
+        builder_obj["b"] = builder->b;
+        builder_obj["f"] = builder->f;
+        action["builder"] = builder_obj;
     }
 
     return action;

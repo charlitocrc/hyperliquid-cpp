@@ -57,15 +57,16 @@ nlohmann::json OrderType::toJson() const {
 
 // OrderWire implementation
 
-nlohmann::json OrderWire::toJson() const {
-    nlohmann::json result = {
-        {"a", asset},
-        {"b", is_buy},
-        {"p", price},
-        {"s", size},
-        {"r", reduce_only},
-        {"t", order_type}
-    };
+nlohmann::ordered_json OrderWire::toJson() const {
+    // Insert keys in the exact order Python uses: a, b, p, s, r, t
+    nlohmann::ordered_json result;
+    result["a"] = asset;
+    result["b"] = is_buy;
+    result["p"] = price;
+    result["s"] = size;
+    result["r"] = reduce_only;
+    result["t"] = order_type;
+
     if (cloid.has_value()) {
         result["c"] = cloid.value();
     }

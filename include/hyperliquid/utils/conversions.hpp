@@ -48,4 +48,19 @@ std::string normalizeAddress(const std::string& address);
  */
 int64_t getTimestampMs();
 
+/**
+ * Round price to Hyperliquid tick size requirements
+ * - Prices can have up to 5 significant figures
+ * - But no more than MAX_DECIMALS - szDecimals decimal places
+ * - MAX_DECIMALS = 6 for perps, 8 for spot
+ * - Integer prices > 100k are always allowed
+ */
+double roundPrice(double price, int sz_decimals, bool is_spot);
+
+/**
+ * Round size to Hyperliquid lot size requirements
+ * - Sizes are rounded to szDecimals
+ */
+double roundSize(double size, int sz_decimals);
+
 } // namespace hyperliquid

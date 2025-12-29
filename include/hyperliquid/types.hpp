@@ -103,7 +103,7 @@ struct OrderWire {
     nlohmann::json order_type;      // "t"
     std::optional<std::string> cloid;  // "c"
 
-    nlohmann::json toJson() const;
+    nlohmann::ordered_json toJson() const;
 };
 
 /**

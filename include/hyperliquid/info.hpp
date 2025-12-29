@@ -36,6 +36,11 @@ public:
     nlohmann::json userState(const std::string& address, const std::string& dex = "");
 
     /**
+     * Query spot user state (balances, spot positions)
+     */
+    nlohmann::json spotUserState(const std::string& address);
+
+    /**
      * Query user's open orders
      */
     nlohmann::json openOrders(const std::string& address, const std::string& dex = "");
@@ -81,6 +86,18 @@ public:
      * Query order by client order ID
      */
     nlohmann::json queryOrderByCloid(const std::string& user, const Cloid& cloid);
+
+    /**
+     * Manually register perpetual metadata
+     * Users must call this to enable nameToAsset() for perp markets
+     */
+    void registerPerpMeta(const Meta& meta, int offset = 0);
+
+    /**
+     * Manually register spot metadata
+     * Users must call this to enable nameToAsset() for spot markets
+     */
+    void registerSpotMeta(const SpotMeta& spot_meta);
 
     // Metadata caches (public for Exchange class access)
     std::unordered_map<std::string, int> coin_to_asset_;

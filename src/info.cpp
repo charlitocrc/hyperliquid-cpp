@@ -17,41 +17,63 @@ Info::Info(const std::string& base_url,
 void Info::initializeMetadata(const Meta* meta,
                               const SpotMeta* spot_meta,
                               const std::vector<std::string>* perp_dexs) {
-    // Initialize perp metadata
-    if (meta) {
-        setPerpMeta(*meta, 0);
-    } else {
-        // Fetch from API
-        auto fetched_meta = this->meta("");
-        setPerpMeta(fetched_meta, 0);
-    }
-
-    // Initialize spot metadata
+    // Auto-fetch spot metadata if not provided (matches Python SDK behavior)
+    SpotMeta spot_meta_obj;
     if (spot_meta) {
-        // Add spot tokens
-        for (const auto& token : spot_meta->tokens) {
-            asset_to_sz_decimals_[10000 + token.index] = token.sz_decimals;
-        }
-        // Add spot pairs
-        for (const auto& pair : spot_meta->universe) {
-            std::string pair_name = pair.name;
-            coin_to_asset_[pair_name] = 10000 + pair.index;
-            name_to_coin_[pair_name] = pair_name;
-        }
+        spot_meta_obj = *spot_meta;
     } else {
-        // Fetch from API
-        auto fetched_spot_meta = spotMeta();
-        // Process fetched data similarly
+        spot_meta_obj = spotMeta();
     }
 
-    // Handle builder-deployed perps if provided
-    if (perp_dexs && !perp_dexs->empty()) {
-        for (size_t i = 0; i < perp_dexs->size(); ++i) {
-            if (!(*perp_dexs)[i].empty()) {
-                auto dex_meta = this->meta((*perp_dexs)[i]);
-                setPerpMeta(dex_meta, 110000 + static_cast<int>(i) * 10000);
-            }
+    // Add spot pairs (matches Python SDK logic)
+    for (const auto& pair : spot_meta_obj.universe) {
+        int asset = 10000 + pair.index;
+
+        // Register pair name (e.g., "@107")
+        coin_to_asset_[pair.name] = asset;
+        name_to_coin_[pair.name] = pair.name;
+
+        // Get base and quote token info
+        int base_idx = pair.tokens[0];
+        int quote_idx = pair.tokens[1];
+        const auto& base_token = spot_meta_obj.tokens[base_idx];
+        const auto& quote_token = spot_meta_obj.tokens[quote_idx];
+
+        // Set sz_decimals to the BASE token's sz_decimals (critical for tick/lot size)
+        asset_to_sz_decimals_[asset] = base_token.sz_decimals;
+
+        // Also register by "BASE/QUOTE" name format
+        std::string pair_format = base_token.name + "/" + quote_token.name;
+        if (name_to_coin_.find(pair_format) == name_to_coin_.end()) {
+            name_to_coin_[pair_format] = pair.name;
         }
+    }
+
+    // Auto-fetch perp metadata if not provided (matches Python SDK behavior)
+    std::vector<std::string> dexs;
+    if (perp_dexs) {
+        dexs = *perp_dexs;
+    } else {
+        dexs = {""};  // Default to empty string (main dex)
+    }
+
+    for (size_t i = 0; i < dexs.size(); ++i) {
+        int offset = 0;
+        if (i > 0) {
+            // Builder-deployed perps start at 110000
+            offset = 110000 + static_cast<int>(i - 1) * 10000;
+        }
+
+        Meta perp_meta_obj;
+        if (dexs[i].empty() && meta) {
+            // Use provided meta for default dex
+            perp_meta_obj = *meta;
+        } else {
+            // Auto-fetch metadata for this dex
+            perp_meta_obj = this->meta(dexs[i]);
+        }
+
+        setPerpMeta(perp_meta_obj, offset);
     }
 }
 
@@ -63,6 +85,36 @@ void Info::setPerpMeta(const Meta& meta, int offset) {
         coin_to_asset_[asset.name] = asset_id;
         name_to_coin_[asset.name] = asset.name;
         asset_to_sz_decimals_[asset_id] = asset.sz_decimals;
+    }
+}
+
+void Info::registerPerpMeta(const Meta& meta, int offset) {
+    setPerpMeta(meta, offset);
+}
+
+void Info::registerSpotMeta(const SpotMeta& spot_meta) {
+    // Add spot pairs (matches Python SDK logic)
+    for (const auto& pair : spot_meta.universe) {
+        int asset = 10000 + pair.index;
+
+        // Register pair name (e.g., "@107")
+        coin_to_asset_[pair.name] = asset;
+        name_to_coin_[pair.name] = pair.name;
+
+        // Get base and quote token info
+        int base_idx = pair.tokens[0];
+        int quote_idx = pair.tokens[1];
+        const auto& base_token = spot_meta.tokens[base_idx];
+        const auto& quote_token = spot_meta.tokens[quote_idx];
+
+        // Set sz_decimals to the BASE token's sz_decimals (critical for tick/lot size)
+        asset_to_sz_decimals_[asset] = base_token.sz_decimals;
+
+        // Also register by "BASE/QUOTE" name format
+        std::string pair_format = base_token.name + "/" + quote_token.name;
+        if (name_to_coin_.find(pair_format) == name_to_coin_.end()) {
+            name_to_coin_[pair_format] = pair.name;
+        }
     }
 }
 
@@ -97,6 +149,14 @@ nlohmann::json Info::userState(const std::string& address, const std::string& de
     if (!dex.empty()) {
         payload["dex"] = dex;
     }
+    return post("/info", payload);
+}
+
+nlohmann::json Info::spotUserState(const std::string& address) {
+    nlohmann::json payload = {
+        {"type", "spotClearinghouseState"},
+        {"user", address}
+    };
     return post("/info", payload);
 }
 

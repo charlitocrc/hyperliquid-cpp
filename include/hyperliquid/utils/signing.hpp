@@ -38,9 +38,10 @@ private:
 
 /**
  * Sign an L1 action (orders, cancels, etc.) using EIP-712
+ * Note: Uses ordered_json to preserve key insertion order for msgpack serialization
  */
 Signature signL1Action(const Wallet& wallet,
-                      const nlohmann::json& action,
+                      const nlohmann::ordered_json& action,
                       const std::optional<std::string>& vault_address,
                       int64_t nonce,
                       std::optional<int64_t> expires_after,
@@ -57,8 +58,9 @@ Signature signUserSignedAction(const Wallet& wallet,
 
 /**
  * Compute action hash: keccak256(msgpack(action) + nonce + vault + expires)
+ * Note: Uses ordered_json to preserve key insertion order for msgpack serialization
  */
-std::vector<uint8_t> actionHash(const nlohmann::json& action,
+std::vector<uint8_t> actionHash(const nlohmann::ordered_json& action,
                                 const std::optional<std::string>& vault_address,
                                 int64_t nonce,
                                 std::optional<int64_t> expires_after);
@@ -87,9 +89,10 @@ OrderWire orderRequestToOrderWire(const OrderRequest& order, int asset);
 
 /**
  * Create order action from order wires
+ * Returns ordered_json to preserve key insertion order for L1 action signing
  */
-nlohmann::json orderWiresToOrderAction(const std::vector<OrderWire>& order_wires,
-                                      const std::optional<BuilderInfo>& builder,
-                                      const std::string& grouping);
+nlohmann::ordered_json orderWiresToOrderAction(const std::vector<OrderWire>& order_wires,
+                                              const std::optional<BuilderInfo>& builder,
+                                              const std::string& grouping);
 
 } // namespace hyperliquid

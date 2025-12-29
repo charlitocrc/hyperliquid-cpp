@@ -64,16 +64,14 @@ double Exchange::slippagePrice(const std::string& name,
 
     int asset = info_.coin_to_asset_[coin];
     bool is_spot = asset >= 10000;
+    int sz_decimals = info_.asset_to_sz_decimals_[asset];
 
     // Calculate slippage
     double price = px.value();
     price *= is_buy ? (1.0 + slippage) : (1.0 - slippage);
 
-    // Round to 5 significant figures and appropriate decimals
-    int decimals = (is_spot ? 8 : 6) - info_.asset_to_sz_decimals_[asset];
-    double rounded = std::round(price * std::pow(10.0, decimals)) / std::pow(10.0, decimals);
-
-    return rounded;
+    // Round to tick size (5 significant figures and MAX_DECIMALS - szDecimals)
+    return roundPrice(price, sz_decimals, is_spot);
 }
 
 void Exchange::setExpiresAfter(std::optional<int64_t> expires_after) {
@@ -88,11 +86,20 @@ nlohmann::json Exchange::order(const std::string& coin,
                                bool reduce_only,
                                const std::optional<Cloid>& cloid,
                                const std::optional<BuilderInfo>& builder) {
+    // Get asset info for rounding
+    int asset = info_.nameToAsset(coin);
+    int sz_decimals = info_.asset_to_sz_decimals_[asset];
+    bool is_spot = asset >= 10000;
+
+    // Round price and size to tick/lot size
+    double rounded_px = roundPrice(limit_px, sz_decimals, is_spot);
+    double rounded_sz = roundSize(sz, sz_decimals);
+
     OrderRequest order_req;
     order_req.coin = coin;
     order_req.is_buy = is_buy;
-    order_req.sz = sz;
-    order_req.limit_px = limit_px;
+    order_req.sz = rounded_sz;
+    order_req.limit_px = rounded_px;
     order_req.order_type = order_type;
     order_req.reduce_only = reduce_only;
     order_req.cloid = cloid;
@@ -106,7 +113,15 @@ nlohmann::json Exchange::bulkOrders(const std::vector<OrderRequest>& orders,
     std::vector<OrderWire> order_wires;
     for (const auto& order : orders) {
         int asset = info_.nameToAsset(order.coin);
-        order_wires.push_back(orderRequestToOrderWire(order, asset));
+        int sz_decimals = info_.asset_to_sz_decimals_[asset];
+        bool is_spot = asset >= 10000;
+
+        // Round price and size to tick/lot size
+        OrderRequest rounded_order = order;
+        rounded_order.limit_px = roundPrice(order.limit_px, sz_decimals, is_spot);
+        rounded_order.sz = roundSize(order.sz, sz_decimals);
+
+        order_wires.push_back(orderRequestToOrderWire(rounded_order, asset));
     }
 
     int64_t timestamp = getTimestampMs();
@@ -187,19 +202,18 @@ nlohmann::json Exchange::cancelByCloid(const std::string& coin, const Cloid& clo
 }
 
 nlohmann::json Exchange::bulkCancel(const std::vector<CancelRequest>& cancels) {
-    nlohmann::json cancels_array = nlohmann::json::array();
+    nlohmann::ordered_json cancels_array = nlohmann::ordered_json::array();
     for (const auto& cancel : cancels) {
         int asset = info_.nameToAsset(cancel.coin);
-        cancels_array.push_back({
-            {"a", asset},
-            {"o", cancel.oid}
-        });
+        nlohmann::ordered_json cancel_obj;
+        cancel_obj["a"] = asset;
+        cancel_obj["o"] = cancel.oid;
+        cancels_array.push_back(cancel_obj);
     }
 
-    nlohmann::json action = {
-        {"type", "cancel"},
-        {"cancels", cancels_array}
-    };
+    nlohmann::ordered_json action;
+    action["type"] = "cancel";
+    action["cancels"] = cancels_array;
 
     int64_t timestamp = getTimestampMs();
     bool is_mainnet = (base_url_ == MAINNET_API_URL);
@@ -213,19 +227,18 @@ nlohmann::json Exchange::bulkCancel(const std::vector<CancelRequest>& cancels) {
 }
 
 nlohmann::json Exchange::bulkCancelByCloid(const std::vector<CancelByCloidRequest>& cancels) {
-    nlohmann::json cancels_array = nlohmann::json::array();
+    nlohmann::ordered_json cancels_array = nlohmann::ordered_json::array();
     for (const auto& cancel : cancels) {
         int asset = info_.nameToAsset(cancel.coin);
-        cancels_array.push_back({
-            {"a", asset},
-            {"o", cancel.cloid.toRaw()}
-        });
+        nlohmann::ordered_json cancel_obj;
+        cancel_obj["a"] = asset;
+        cancel_obj["o"] = cancel.cloid.toRaw();
+        cancels_array.push_back(cancel_obj);
     }
 
-    nlohmann::json action = {
-        {"type", "cancel"},
-        {"cancels", cancels_array}
-    };
+    nlohmann::ordered_json action;
+    action["type"] = "cancel";
+    action["cancels"] = cancels_array;
 
     int64_t timestamp = getTimestampMs();
     bool is_mainnet = (base_url_ == MAINNET_API_URL);
@@ -246,12 +259,21 @@ nlohmann::json Exchange::modifyOrder(const OidOrCloid& oid,
                                      const OrderType& order_type,
                                      bool reduce_only,
                                      const std::optional<Cloid>& cloid) {
+    // Get asset info for rounding
+    int asset = info_.nameToAsset(coin);
+    int sz_decimals = info_.asset_to_sz_decimals_[asset];
+    bool is_spot = asset >= 10000;
+
+    // Round price and size to tick/lot size
+    double rounded_px = roundPrice(limit_px, sz_decimals, is_spot);
+    double rounded_sz = roundSize(sz, sz_decimals);
+
     ModifyRequest modify_req;
     modify_req.oid = oid;
     modify_req.order.coin = coin;
     modify_req.order.is_buy = is_buy;
-    modify_req.order.sz = sz;
-    modify_req.order.limit_px = limit_px;
+    modify_req.order.sz = rounded_sz;
+    modify_req.order.limit_px = rounded_px;
     modify_req.order.order_type = order_type;
     modify_req.order.reduce_only = reduce_only;
     modify_req.order.cloid = cloid;
@@ -260,12 +282,20 @@ nlohmann::json Exchange::modifyOrder(const OidOrCloid& oid,
 }
 
 nlohmann::json Exchange::bulkModifyOrders(const std::vector<ModifyRequest>& modifies) {
-    nlohmann::json modifies_array = nlohmann::json::array();
+    nlohmann::ordered_json modifies_array = nlohmann::ordered_json::array();
     for (const auto& modify : modifies) {
         int asset = info_.nameToAsset(modify.order.coin);
-        OrderWire wire = orderRequestToOrderWire(modify.order, asset);
+        int sz_decimals = info_.asset_to_sz_decimals_[asset];
+        bool is_spot = asset >= 10000;
 
-        nlohmann::json modify_wire;
+        // Round price and size to tick/lot size
+        OrderRequest rounded_order = modify.order;
+        rounded_order.limit_px = roundPrice(modify.order.limit_px, sz_decimals, is_spot);
+        rounded_order.sz = roundSize(modify.order.sz, sz_decimals);
+
+        OrderWire wire = orderRequestToOrderWire(rounded_order, asset);
+
+        nlohmann::ordered_json modify_wire;
         if (std::holds_alternative<int64_t>(modify.oid)) {
             modify_wire["oid"] = std::get<int64_t>(modify.oid);
         } else {
@@ -276,10 +306,9 @@ nlohmann::json Exchange::bulkModifyOrders(const std::vector<ModifyRequest>& modi
         modifies_array.push_back(modify_wire);
     }
 
-    nlohmann::json action = {
-        {"type", "batchModify"},
-        {"modifies", modifies_array}
-    };
+    nlohmann::ordered_json action;
+    action["type"] = "batchModify";
+    action["modifies"] = modifies_array;
 
     int64_t timestamp = getTimestampMs();
     bool is_mainnet = (base_url_ == MAINNET_API_URL);
@@ -347,25 +376,20 @@ nlohmann::json Exchange::updateLeverage(int leverage,
                                         bool is_cross) {
     int asset = info_.nameToAsset(coin);
 
-    nlohmann::json leverage_obj;
+    nlohmann::ordered_json leverage_obj;
     if (is_cross) {
-        leverage_obj = {
-            {"type", "cross"},
-            {"value", leverage}
-        };
+        leverage_obj["type"] = "cross";
+        leverage_obj["value"] = leverage;
     } else {
-        leverage_obj = {
-            {"type", "isolated"},
-            {"value", leverage}
-        };
+        leverage_obj["type"] = "isolated";
+        leverage_obj["value"] = leverage;
     }
 
-    nlohmann::json action = {
-        {"type", "updateLeverage"},
-        {"asset", asset},
-        {"isCross", is_cross},
-        {"leverage", leverage}
-    };
+    nlohmann::ordered_json action;
+    action["type"] = "updateLeverage";
+    action["asset"] = asset;
+    action["isCross"] = is_cross;
+    action["leverage"] = leverage;
 
     int64_t timestamp = getTimestampMs();
     bool is_mainnet = (base_url_ == MAINNET_API_URL);
