@@ -14,11 +14,13 @@ int main() {
         }
 
         auto wallet = hyperliquid::Wallet::fromPrivateKey(private_key);
+
+        // Exchange automatically fetches metadata during construction
         hyperliquid::Exchange exchange(wallet, hyperliquid::TESTNET_API_URL);
 
-        std::string coin = "ETH";
+        std::string coin = "HYPE";
         bool is_buy = false;  // Sell
-        double sz = 0.05;
+        double sz = 1;
 
         std::cout << "Market " << (is_buy ? "Buy" : "Sell")
                   << " " << sz << " " << coin << "\n\n";

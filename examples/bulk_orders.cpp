@@ -13,6 +13,8 @@ int main() {
         }
 
         auto wallet = hyperliquid::Wallet::fromPrivateKey(private_key);
+
+        // Exchange automatically fetches metadata during construction
         hyperliquid::Exchange exchange(wallet, hyperliquid::TESTNET_API_URL);
 
         std::cout << "Creating buy ladder for ETH...\n\n";

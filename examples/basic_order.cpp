@@ -20,6 +20,7 @@ int main() {
         std::cout << "Using address: " << address << "\n\n";
 
         // Create exchange client (testnet)
+        // Metadata is automatically fetched during construction
         hyperliquid::Exchange exchange(wallet, hyperliquid::TESTNET_API_URL);
 
         // Get user state
