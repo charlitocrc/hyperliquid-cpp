@@ -2,6 +2,8 @@
 
 A C++ SDK for interacting with the Hyperliquid decentralized exchange, supporting core trading features including order placement, cancellation, position management, and market data queries.
 
+**New to this SDK?** → See [QUICKSTART.md](QUICKSTART.md) for a quick 2-minute setup guide.
+
 ## Features
 
 - ✅ Place and cancel limit orders
@@ -13,6 +15,52 @@ A C++ SDK for interacting with the Hyperliquid decentralized exchange, supportin
 - ✅ Leverage management
 - ✅ Full EIP-712 signing support
 - ✅ Testnet and Mainnet support
+
+## Quick Start for Developers
+
+### 1. Install Dependencies
+
+**macOS:**
+```bash
+brew install curl openssl@3 cmake
+```
+
+**Ubuntu/Debian:**
+```bash
+sudo apt-get install -y libcurl4-openssl-dev libssl-dev cmake build-essential
+```
+
+### 2. Build the Library
+
+```bash
+make build
+```
+
+### 3. Compile Your Code
+
+**Easy way** - Use the compile script:
+```bash
+./compile.sh your_file.cpp
+./your_file
+```
+
+**Or** add your file to `examples/` and use CMake:
+```bash
+# Move your file to examples/
+mv your_file.cpp examples/
+
+# Add to examples/CMakeLists.txt, then:
+cd build
+make your_file
+```
+
+### 4. Run Examples
+
+```bash
+make examples
+export HYPERLIQUID_PRIVATE_KEY="0x..."
+./build/examples/basic_order
+```
 
 ## Requirements
 
@@ -57,9 +105,44 @@ make -j$(nproc)
 sudo make install
 ```
 
-## Quick Start
+## Usage Guide
 
-### Basic Usage
+### Writing Your First Bot
+
+Create a file `my_bot.cpp`:
+
+```cpp
+#include <hyperliquid/exchange.hpp>
+#include <hyperliquid/utils/constants.hpp>
+#include <iostream>
+#include <cstdlib>
+
+int main() {
+    const char* key = std::getenv("HYPERLIQUID_PRIVATE_KEY");
+    if (!key) {
+        std::cerr << "Set HYPERLIQUID_PRIVATE_KEY\n";
+        return 1;
+    }
+
+    auto wallet = hyperliquid::Wallet::fromPrivateKey(key);
+    hyperliquid::Exchange exchange(wallet, hyperliquid::TESTNET_API_URL);
+
+    // Your trading logic here
+    auto result = exchange.marketOpen("ETH", true, 0.1);
+    std::cout << result.dump(2) << "\n";
+
+    return 0;
+}
+```
+
+Compile and run:
+```bash
+./compile.sh my_bot.cpp
+export HYPERLIQUID_PRIVATE_KEY="0x..."
+./my_bot
+```
+
+### Basic Code Examples
 
 ```cpp
 #include <hyperliquid/exchange.hpp>
