@@ -60,6 +60,14 @@ std::vector<uint8_t> encodeField(const std::string& type, const nlohmann::json& 
             encoded[24 + (7 - i)] = (num >> (i * 8)) & 0xFF;
         }
         return encoded;
+    } else if (type == "uint256") {
+        // Encode as big-endian 32 bytes
+        // Can handle both uint64 and larger numbers stored as uint64
+        uint64_t num = value.get<uint64_t>();
+        for (int i = 7; i >= 0; --i) {
+            encoded[24 + (7 - i)] = (num >> (i * 8)) & 0xFF;
+        }
+        return encoded;
     } else if (type == "address") {
         // Address is 20 bytes, left-padded to 32 bytes
         std::string addr = value.get<std::string>();
