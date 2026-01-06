@@ -123,6 +123,23 @@ public:
                                  bool is_cross = true);
 
     /**
+     * Schedule future cancel of all open orders.
+     * The time must be at least 5 seconds after the current time.
+     * Once the time comes, all open orders will be canceled and a trigger count
+     * will be incremented. The max number of triggers per day is 10.
+     * This trigger count is reset at 00:00 UTC.
+     *
+     * @param time If provided, set the cancel time (UTC millis). If nullopt, unsets any scheduled cancel.
+     */
+    nlohmann::json scheduleCancel(std::optional<int64_t> time = std::nullopt);
+
+    /**
+     * Query order status by client order ID.
+     * Convenience method that delegates to info_.queryOrderByCloid().
+     */
+    nlohmann::json queryOrderByCloid(const std::string& user, const Cloid& cloid);
+
+    /**
      * Set expiration time for actions (optional)
      */
     void setExpiresAfter(std::optional<int64_t> expires_after);
