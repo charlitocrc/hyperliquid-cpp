@@ -46,6 +46,38 @@ public:
     nlohmann::json openOrders(const std::string& address, const std::string& dex = "");
 
     /**
+     * Query user's open orders with additional frontend info
+     *
+     * Returns extended order information including trigger conditions,
+     * order type, reduce-only status, time-in-force, and child orders.
+     *
+     * @param address Onchain address in 42-character hexadecimal format
+     * @param dex Optional dex identifier (empty string for default dex)
+     * @return Array of frontend open orders:
+     *         [
+     *           {
+     *             children: [...],           // Child orders (e.g., TP/SL)
+     *             coin: str,                 // Asset name
+     *             isPositionTpsl: bool,      // Is position take-profit/stop-loss
+     *             isTrigger: bool,           // Is trigger order
+     *             limitPx: float string,     // Limit price
+     *             oid: int,                  // Order ID
+     *             orderType: str,            // Order type (Limit, Stop Market, etc.)
+     *             origSz: float string,      // Original size
+     *             reduceOnly: bool,          // Reduce-only flag
+     *             side: "A" | "B",           // Ask or Bid
+     *             sz: float string,          // Current size
+     *             tif: str,                  // Time-in-force (Gtc, Ioc, Alo)
+     *             timestamp: int,            // Order timestamp (ms)
+     *             triggerCondition: str,     // Trigger condition
+     *             triggerPx: float string    // Trigger price
+     *           },
+     *           ...
+     *         ]
+     */
+    nlohmann::json frontendOpenOrders(const std::string& address, const std::string& dex = "");
+
+    /**
      * Get all mid prices
      */
     nlohmann::json allMids(const std::string& dex = "");

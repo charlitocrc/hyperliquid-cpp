@@ -171,6 +171,17 @@ nlohmann::json Info::openOrders(const std::string& address, const std::string& d
     return post("/info", payload);
 }
 
+nlohmann::json Info::frontendOpenOrders(const std::string& address, const std::string& dex) {
+    nlohmann::json payload = {
+        {"type", "frontendOpenOrders"},
+        {"user", address}
+    };
+    if (!dex.empty()) {
+        payload["dex"] = dex;
+    }
+    return post("/info", payload);
+}
+
 nlohmann::json Info::allMids(const std::string& dex) {
     nlohmann::json payload = {
         {"type", "allMids"}

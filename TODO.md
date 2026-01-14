@@ -24,16 +24,16 @@ This document tracks features from the Python SDK that need to be implemented to
 
 ### Exchange Class - Advanced Order Management
 
-- [ ] `scheduleCancel()` - Schedule future cancel of all orders for a coin
-- [ ] `queryOrderByCloid()` - Query order status by client order ID (currently only in Info)
+- [x] `scheduleCancel()` - Schedule future cancel of all orders for a coin
+- [x] `queryOrderByCloid()` - Query order status by client order ID (also available in Info class)
 
 ### Info Class - Essential Queries
 
-- [ ] `spotUserState()` - Get spot trading details for user
-- [ ] `frontendOpenOrders()` - Get open orders with additional frontend info
+- [x] `spotUserState()` - Get spot trading details for user
+- [x] `frontendOpenOrders()` - Get open orders with additional frontend info
 - [ ] `historicalOrders()` - Get last 2000 historical orders for user
-- [ ] `queryOrderByCloid()` - Query order by client order ID
-- [ ] `userFillsByTime()` - Get fills by time range with aggregation
+- [x] `queryOrderByCloid()` - Query order by client order ID
+- [x] `userFillsByTime()` - Get fills by time range with aggregation
 - [ ] `userFees()` - Get user's fee schedule and volume tier
 - [ ] `fundingHistory()` - Get funding rate history for a coin
 - [ ] `userFundingHistory()` - Get user's funding payment history
