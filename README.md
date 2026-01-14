@@ -488,6 +488,10 @@ brew install curl
 - [Official Python SDK](https://github.com/hyperliquid-dex/hyperliquid-python-sdk)
 - [API Documentation](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api)
 
+## Sponsors
+
+- [Hyperlens.io](https://hyperlens.io) - Hyperliquid data platform with analytics on traders, dexes, builders, and more.
+
 ## Contributing
 
 Contributions are welcome! Please ensure:
