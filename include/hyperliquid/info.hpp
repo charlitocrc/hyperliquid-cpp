@@ -120,6 +120,185 @@ public:
     nlohmann::json queryOrderByCloid(const std::string& user, const Cloid& cloid);
 
     /**
+     * Retrieve OHLCV candle data for a coin
+     *
+     * Only the most recent 5000 candles are available.
+     * Supported intervals: "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h",
+     *                      "8h", "12h", "1d", "3d", "1w", "1M"
+     *
+     * @param name       Coin name (e.g. "ETH"). Resolved via nameToCoin mapping.
+     * @param interval   Candle interval string (e.g. "1h")
+     * @param start_time Start time in milliseconds (inclusive)
+     * @param end_time   Optional end time in milliseconds (inclusive). Defaults to current time.
+     * @return Array of candle records:
+     *         [
+     *           {
+     *             T: int,          // Candle close time (ms)
+     *             t: int,          // Candle open time (ms)
+     *             s: str,          // Coin name
+     *             i: str,          // Interval
+     *             o: float string, // Open price
+     *             h: float string, // High price
+     *             l: float string, // Low price
+     *             c: float string, // Close price
+     *             v: float string, // Volume (base asset)
+     *             n: int           // Number of trades
+     *           },
+     *           ...
+     *         ]
+     */
+    nlohmann::json candlesSnapshot(const std::string& name,
+                                   const std::string& interval,
+                                   int64_t start_time,
+                                   std::optional<int64_t> end_time = std::nullopt);
+
+    /**
+     * Retrieve a user's TWAP slice fills (last 2000)
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return Array of TWAP slice fill records:
+     *         [
+     *           {
+     *             fill: {
+     *               closedPnl: float string,
+     *               coin: str,
+     *               crossed: bool,
+     *               dir: str,           // e.g. "Open Long", "Sell"
+     *               hash: str,          // Always 0x000...0 for TWAP fills
+     *               oid: int,
+     *               px: float string,
+     *               side: "A" | "B",
+     *               startPosition: float string,
+     *               sz: float string,
+     *               time: int,
+     *               fee: float string,
+     *               feeToken: str,
+     *               tid: int
+     *             },
+     *             twapId: int           // TWAP order ID
+     *           },
+     *           ...
+     *         ]
+     */
+    nlohmann::json userTwapSliceFills(const std::string& user);
+
+    /**
+     * Query a user's fee schedule, volume tier, and staking discounts
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return Object containing:
+     *         {
+     *           dailyUserVlm: [{date, userCross, userAdd, exchange}, ...],
+     *           feeSchedule: {
+     *             cross: str, add: str, spotCross: str, spotAdd: str,
+     *             tiers: { vip: [...], mm: [...] },
+     *             referralDiscount: str,
+     *             stakingDiscountTiers: [{bpsOfMaxSupply, discount}, ...]
+     *           },
+     *           userCrossRate: str,      // Effective cross fee rate
+     *           userAddRate: str,        // Effective add (maker) fee rate
+     *           userSpotCrossRate: str,
+     *           userSpotAddRate: str,
+     *           activeReferralDiscount: str,
+     *           trial: null | {...},
+     *           feeTrialReward: str,
+     *           nextTrialAvailableTimestamp: null | int,
+     *           stakingLink: {type, stakingUser} | null,
+     *           activeStakingDiscount: {bpsOfMaxSupply, discount} | null
+     *         }
+     */
+    nlohmann::json userFees(const std::string& user);
+
+    /**
+     * Check the maximum builder fee a user has approved for a builder
+     *
+     * @param user    Address in 42-character hexadecimal format
+     * @param builder Builder address in 42-character hexadecimal format
+     * @return Integer: maximum approved fee in tenths of a basis point
+     *         (e.g. 1 means 0.001%, 10 means 0.01%)
+     */
+    nlohmann::json maxBuilderFee(const std::string& user, const std::string& builder);
+
+    /**
+     * Retrieve a user's historical orders (last 2000)
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return Array of historical order records, each containing:
+     *         {
+     *           order: {
+     *             coin: str,               // Asset name
+     *             side: "A" | "B",         // Ask (sell) or Bid (buy)
+     *             limitPx: float string,   // Limit price
+     *             sz: float string,        // Remaining size
+     *             oid: int,                // Order ID
+     *             timestamp: int,          // Creation timestamp (ms)
+     *             triggerCondition: str,   // e.g. "N/A", "tp", "sl"
+     *             isTrigger: bool,
+     *             triggerPx: float string,
+     *             children: [...],         // Child TP/SL orders
+     *             isPositionTpsl: bool,
+     *             reduceOnly: bool,
+     *             orderType: str,          // e.g. "Limit", "Market", "Stop Market"
+     *             origSz: float string,    // Original size at placement
+     *             tif: str,               // Time-in-force: "Gtc", "Ioc", "Alo", "FrontendMarket"
+     *             cloid: str | null        // Client order ID if set
+     *           },
+     *           status: str,               // "filled", "open", "canceled", "triggered",
+     *                                      // "rejected", "marginCanceled", etc.
+     *           statusTimestamp: int       // Timestamp of last status change (ms)
+     *         }
+     */
+    nlohmann::json historicalOrders(const std::string& user);
+
+    /**
+     * Retrieve historical funding rates for a coin
+     *
+     * @param name Coin name (e.g. "ETH"). Resolved via nameToCoin mapping.
+     * @param start_time Start time in milliseconds (inclusive)
+     * @param end_time Optional end time in milliseconds (inclusive). Defaults to current time.
+     * @return Array of funding rate records:
+     *         [
+     *           {
+     *             coin: str,           // Coin name
+     *             fundingRate: str,    // Funding rate (float string)
+     *             premium: str,        // Premium (float string)
+     *             time: int            // Timestamp in milliseconds
+     *           },
+     *           ...
+     *         ]
+     */
+    nlohmann::json fundingHistory(const std::string& name,
+                                  int64_t start_time,
+                                  std::optional<int64_t> end_time = std::nullopt);
+
+    /**
+     * Retrieve a user's funding payment history
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @param start_time Start time in milliseconds (inclusive)
+     * @param end_time Optional end time in milliseconds (inclusive). Defaults to current time.
+     * @return Array of funding payment records:
+     *         [
+     *           {
+     *             delta: {
+     *               coin: str,          // Coin name
+     *               fundingRate: str,   // Applied funding rate
+     *               szi: str,           // Position size at time of funding
+     *               type: "funding",
+     *               usdc: str,          // USDC amount paid/received (negative = paid)
+     *               nSamples: int|null
+     *             },
+     *             hash: str,            // Transaction hash
+     *             time: int             // Timestamp in milliseconds
+     *           },
+     *           ...
+     *         ]
+     */
+    nlohmann::json userFundingHistory(const std::string& user,
+                                      int64_t start_time,
+                                      std::optional<int64_t> end_time = std::nullopt);
+
+    /**
      * Manually register perpetual metadata
      * Users must call this to enable nameToAsset() for perp markets
      */

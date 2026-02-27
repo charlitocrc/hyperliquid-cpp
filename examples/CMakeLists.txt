@@ -6,6 +6,10 @@ set(EXAMPLES
     basic_market_order
     query_positions
     bulk_orders
+    funding_history
+    historical_orders
+    user_fees
+    candles_snapshot
 )
 
 foreach(EXAMPLE ${EXAMPLES})

@@ -295,4 +295,86 @@ nlohmann::json Info::queryOrderByCloid(const std::string& user, const Cloid& clo
     return post("/info", payload);
 }
 
+nlohmann::json Info::candlesSnapshot(const std::string& name,
+                                     const std::string& interval,
+                                     int64_t start_time,
+                                     std::optional<int64_t> end_time) {
+    const std::string& coin = nameToCoin(name);
+    nlohmann::json req = {
+        {"coin", coin},
+        {"interval", interval},
+        {"startTime", start_time}
+    };
+    if (end_time.has_value()) {
+        req["endTime"] = end_time.value();
+    }
+    nlohmann::json payload = {
+        {"type", "candleSnapshot"},
+        {"req", req}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::userTwapSliceFills(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "userTwapSliceFills"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::userFees(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "userFees"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::maxBuilderFee(const std::string& user, const std::string& builder) {
+    nlohmann::json payload = {
+        {"type", "maxBuilderFee"},
+        {"user", user},
+        {"builder", builder}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::historicalOrders(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "historicalOrders"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::fundingHistory(const std::string& name,
+                                    int64_t start_time,
+                                    std::optional<int64_t> end_time) {
+    const std::string& coin = nameToCoin(name);
+    nlohmann::json payload = {
+        {"type", "fundingHistory"},
+        {"coin", coin},
+        {"startTime", start_time}
+    };
+    if (end_time.has_value()) {
+        payload["endTime"] = end_time.value();
+    }
+    return post("/info", payload);
+}
+
+nlohmann::json Info::userFundingHistory(const std::string& user,
+                                        int64_t start_time,
+                                        std::optional<int64_t> end_time) {
+    nlohmann::json payload = {
+        {"type", "userFunding"},
+        {"user", user},
+        {"startTime", start_time}
+    };
+    if (end_time.has_value()) {
+        payload["endTime"] = end_time.value();
+    }
+    return post("/info", payload);
+}
+
 } // namespace hyperliquid

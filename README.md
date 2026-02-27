@@ -490,7 +490,7 @@ brew install curl
 
 ## Sponsors
 
-- [Hyperlens.io](https://hyperlens.io) - Hyperliquid data platform with analytics on traders, dexes, builders, and more.
+- [Hyperlens.io](https://hyperlens.io) - Hyperliquid data platform with actionable analytics on traders, dexes, builders, and more.
 
 ## Contributing
 

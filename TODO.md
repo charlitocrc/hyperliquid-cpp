@@ -11,7 +11,7 @@ This document tracks features from the Python SDK that need to be implemented to
 - ✅ Market orders (open, close)
 - ✅ Transfers (USD, spot)
 - ✅ Leverage management
-- ✅ Basic Info queries (userState, openOrders, allMids, userFills, meta, spotMeta, l2Snapshot, queryOrderByOid)
+- ✅ Basic Info queries (userState, spotUserState, openOrders, frontendOpenOrders, allMids, userFills, userFillsByTime, meta, spotMeta, l2Snapshot, queryOrderByOid, queryOrderByCloid)
 - ✅ EIP-712 signing infrastructure
 - ✅ Wallet management with ECDSA secp256k1
 - ✅ 4 working examples
@@ -31,13 +31,15 @@ This document tracks features from the Python SDK that need to be implemented to
 
 - [x] `spotUserState()` - Get spot trading details for user
 - [x] `frontendOpenOrders()` - Get open orders with additional frontend info
-- [ ] `historicalOrders()` - Get last 2000 historical orders for user
+- [x] `historicalOrders()` - Get last 2000 historical orders for user
 - [x] `queryOrderByCloid()` - Query order by client order ID
 - [x] `userFillsByTime()` - Get fills by time range with aggregation
-- [ ] `userFees()` - Get user's fee schedule and volume tier
-- [ ] `fundingHistory()` - Get funding rate history for a coin
-- [ ] `userFundingHistory()` - Get user's funding payment history
-- [ ] `candlesSnapshot()` - Get candle/OHLCV data for charting
+- [x] `userFees()` - Get user's fee schedule, volume tier, staking discount, and daily VLM
+- [x] `fundingHistory()` - Get funding rate history for a coin
+- [x] `userFundingHistory()` - Get user's funding payment history
+- [x] `candlesSnapshot()` - Get candle/OHLCV data (supported intervals: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 8h, 12h, 1d, 3d, 1w, 1M; max 5000 candles)
+- [x] `maxBuilderFee()` - Check max builder fee (in tenths of a bps) approved by user for a builder address
+- [x] `userTwapSliceFills()` - Get last 2000 TWAP slice fills for user (moved from Advanced Queries)
 
 ### Error Handling Improvements
 
@@ -70,13 +72,14 @@ This document tracks features from the Python SDK that need to be implemented to
 
 ### Info Class - Account Queries
 
-- [ ] `querySubAccounts()` - Get list of sub-accounts for user
-- [ ] `queryReferralState()` - Get referral code and statistics
-- [ ] `extraAgents()` - Get approved agent addresses
-- [ ] `userRole()` - Get user role/account type
-- [ ] `userRateLimit()` - Get API rate limit configuration
-- [ ] `portfolio()` - Get comprehensive portfolio performance data
+- [ ] `querySubAccounts()` - Get list of sub-accounts with clearinghouse and spot state
+- [ ] `queryReferralState()` - Get referral code, cumulative VLM, unclaimed/claimed rewards, and referral history
+- [ ] `approvedBuilders()` - Get list of approved builder addresses for user (was `extraAgents`)
+- [ ] `userRole()` - Get user role: "missing", "user", "agent", "vault", or "subAccount"
+- [ ] `userRateLimit()` - Get API rate limit (cumVlm, nRequestsUsed, nRequestsCap, nRequestsSurplus)
+- [ ] `portfolio()` - Get portfolio performance history (day/week/month/allTime/perpDay/perpWeek/perpMonth/perpAllTime)
 - [ ] `userNonFundingLedgerUpdates()` - Get deposits, withdrawals, transfers
+- [ ] `vaultDetails()` - Get vault details including portfolio history, followers, APR, commission, and relationships
 
 ---
 
@@ -95,9 +98,9 @@ This document tracks features from the Python SDK that need to be implemented to
 
 ### Info Class - Advanced Queries
 
-- [ ] `userTwapSliceFills()` - Get TWAP slice fills (last 2000)
-- [ ] `userVaultEquities()` - Get vault equity positions
-- [ ] `queryUserDexAbstractionState()` - Get dex abstraction state
+- [ ] `userVaultEquities()` - Get vault equity positions (vaultAddress + equity per vault)
+- [ ] `queryUserDexAbstractionState()` - Get HIP-3 DEX abstraction state (bool)
+- [ ] `userAbstraction()` - Get user abstraction mode: "unifiedAccount", "portfolioMargin", "disabled", "default", or "dexAbstraction"
 
 ---
 
@@ -175,10 +178,20 @@ This document tracks features from the Python SDK that need to be implemented to
 
 ### Info Class - Staking Queries (4 methods)
 
-- [ ] `userStakingSummary()` - Get staking summary for user
-- [ ] `userStakingDelegations()` - Get active delegations
-- [ ] `userStakingRewards()` - Get staking rewards history
-- [ ] `delegatorHistory()` - Get comprehensive delegation history
+- [ ] `userStakingSummary()` - Get staking summary: delegated, undelegated, totalPendingWithdrawal, nPendingWithdrawals
+- [ ] `userStakingDelegations()` - Get active delegations per validator with locked-until timestamps
+- [ ] `userStakingRewards()` - Get staking rewards history (source: "delegation" or "commission")
+- [ ] `delegatorHistory()` - Get delegation/undelegation history with hashes
+
+### Info Class - Borrow/Lend Queries (3 methods, new feature)
+
+- [ ] `borrowLendUserState()` - Get user's borrow/lend positions (borrow/supply basis and value per token)
+- [ ] `borrowLendReserveState()` - Get reserve state for a token (rates, utilization, balance, LTV, oracle price)
+- [ ] `allBorrowLendReserveStates()` - Get reserve state for all tokens
+
+### Info Class - Aligned Quote Token / HIP Queries (1 method, new feature)
+
+- [ ] `alignedQuoteTokenInfo()` - Get aligned quote token status (isAligned, firstAlignedTime, evmMintedSupply, dailyAmountOwed, predictedRate)
 
 ---
 
@@ -369,15 +382,18 @@ This document tracks features from the Python SDK that need to be implemented to
 | **Market Data** |
 | User State | ✅ | ✅ | Complete |
 | Open Orders | ✅ | ✅ | Complete |
-| Historical Orders | ✅ | ❌ | TODO |
+| Historical Orders | ✅ | ✅ | Complete |
 | User Fills | ✅ | ✅ | Complete |
-| Fills by Time | ✅ | ❌ | TODO |
+| Fills by Time | ✅ | ✅ | Complete |
 | L2 Book | ✅ | ✅ | Complete |
 | Candles | ✅ | ❌ | TODO |
 | All Mids | ✅ | ✅ | Complete |
 | Funding History | ✅ | ❌ | TODO |
 | User Fees | ✅ | ❌ | TODO |
 | Portfolio | ✅ | ❌ | TODO |
+| Builder Fee Check | ✅ | ✅ | Complete |
+| Vault Details | ✅ | ❌ | TODO |
+| Borrow/Lend | ✅ | ❌ | TODO |
 | **Real-Time Data** |
 | WebSocket Support | ✅ | ❌ | TODO |
 | Live Order Updates | ✅ | ❌ | TODO |
