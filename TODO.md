@@ -72,14 +72,14 @@ This document tracks features from the Python SDK that need to be implemented to
 
 ### Info Class - Account Queries
 
-- [ ] `querySubAccounts()` - Get list of sub-accounts with clearinghouse and spot state
-- [ ] `queryReferralState()` - Get referral code, cumulative VLM, unclaimed/claimed rewards, and referral history
-- [ ] `approvedBuilders()` - Get list of approved builder addresses for user (was `extraAgents`)
-- [ ] `userRole()` - Get user role: "missing", "user", "agent", "vault", or "subAccount"
-- [ ] `userRateLimit()` - Get API rate limit (cumVlm, nRequestsUsed, nRequestsCap, nRequestsSurplus)
-- [ ] `portfolio()` - Get portfolio performance history (day/week/month/allTime/perpDay/perpWeek/perpMonth/perpAllTime)
-- [ ] `userNonFundingLedgerUpdates()` - Get deposits, withdrawals, transfers
-- [ ] `vaultDetails()` - Get vault details including portfolio history, followers, APR, commission, and relationships
+- [x] `querySubAccounts()` - Get list of sub-accounts with clearinghouse and spot state
+- [x] `queryReferralState()` - Get referral code, cumulative VLM, unclaimed/claimed rewards, and referral history
+- [x] `approvedBuilders()` - Get list of approved builder addresses for user (was `extraAgents`)
+- [x] `userRole()` - Get user role: "missing", "user", "agent", "vault", or "subAccount"
+- [x] `userRateLimit()` - Get API rate limit (cumVlm, nRequestsUsed, nRequestsCap, nRequestsSurplus)
+- [x] `portfolio()` - Get portfolio performance history (day/week/month/allTime/perpDay/perpWeek/perpMonth/perpAllTime)
+- [x] `userNonFundingLedgerUpdates()` - Get deposits, withdrawals, transfers
+- [x] `vaultDetails()` - Get vault details including portfolio history, followers, APR, commission, and relationships
 
 ---
 
@@ -390,9 +390,9 @@ This document tracks features from the Python SDK that need to be implemented to
 | All Mids | ✅ | ✅ | Complete |
 | Funding History | ✅ | ❌ | TODO |
 | User Fees | ✅ | ❌ | TODO |
-| Portfolio | ✅ | ❌ | TODO |
+| Portfolio | ✅ | ✅ | Complete |
 | Builder Fee Check | ✅ | ✅ | Complete |
-| Vault Details | ✅ | ❌ | TODO |
+| Vault Details | ✅ | ✅ | Complete |
 | Borrow/Lend | ✅ | ❌ | TODO |
 | **Real-Time Data** |
 | WebSocket Support | ✅ | ❌ | TODO |

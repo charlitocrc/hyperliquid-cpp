@@ -363,6 +363,88 @@ nlohmann::json Info::fundingHistory(const std::string& name,
     return post("/info", payload);
 }
 
+nlohmann::json Info::querySubAccounts(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "subAccounts"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::queryReferralState(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "referral"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::approvedBuilders(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "approvedBuilders"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::userRole(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "userRole"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::userRateLimit(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "userRateLimit"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::portfolio(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "portfolio"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::userNonFundingLedgerUpdates(const std::string& user,
+                                                  int64_t start_time,
+                                                  std::optional<int64_t> end_time) {
+    nlohmann::json payload = {
+        {"type", "userNonFundingLedgerUpdates"},
+        {"user", user},
+        {"startTime", start_time}
+    };
+    if (end_time.has_value()) {
+        payload["endTime"] = end_time.value();
+    }
+    return post("/info", payload);
+}
+
+nlohmann::json Info::vaultDetails(const std::string& vault_address,
+                                   const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "vaultDetails"},
+        {"vaultAddress", vault_address}
+    };
+    if (!user.empty()) {
+        payload["user"] = user;
+    }
+    return post("/info", payload);
+}
+
+nlohmann::json Info::userVaultEquities(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "userVaultEquities"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
 nlohmann::json Info::userFundingHistory(const std::string& user,
                                         int64_t start_time,
                                         std::optional<int64_t> end_time) {

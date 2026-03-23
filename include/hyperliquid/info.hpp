@@ -299,6 +299,158 @@ public:
                                       std::optional<int64_t> end_time = std::nullopt);
 
     /**
+     * Query sub-accounts for a user
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return Array of sub-account objects, each containing clearinghouseState and spotState,
+     *         or null if user has no sub-accounts.
+     *         [
+     *           {
+     *             subAccountUser: str,       // Sub-account address
+     *             name: str,                 // Sub-account name
+     *             master: str,               // Master account address
+     *             clearinghouseState: {...},  // Perp positions, margin summary
+     *             spotState: {...}            // Spot balances
+     *           },
+     *           ...
+     *         ]
+     */
+    nlohmann::json querySubAccounts(const std::string& user);
+
+    /**
+     * Query referral information for a user
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return Object containing referral code, cumulative VLM, unclaimed/claimed rewards,
+     *         and referred user history:
+     *         {
+     *           referredBy: { referrer: str, code: str } | null,
+     *           cumVlm: str,
+     *           unclaimedRewards: str,
+     *           claimedRewards: str,
+     *           builderRewards: str,
+     *           referrerState: {
+     *             stage: str,
+     *             data: {
+     *               code: str,
+     *               referralStates: [
+     *                 { cumVlm: str, cumRewardedFeesSinceReferred: str, ... },
+     *                 ...
+     *               ]
+     *             }
+     *           },
+     *           rewardHistory: [...]
+     *         }
+     */
+    nlohmann::json queryReferralState(const std::string& user);
+
+    /**
+     * Get list of approved builder addresses for a user
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return Array of approved builder addresses:
+     *         ["0x476fa87b4d3818f437f38f1263bee508d7672d82", ...]
+     */
+    nlohmann::json approvedBuilders(const std::string& user);
+
+    /**
+     * Query role and account type for a user
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return Object with role field: "missing", "user", "agent", "vault", or "subAccount"
+     *         For agents: {"role": "agent", "data": {"user": "0x..."}}
+     *         For subaccounts: {"role": "subAccount", "data": {"master": "0x..."}}
+     *         For others: {"role": "<type>"}
+     */
+    nlohmann::json userRole(const std::string& user);
+
+    /**
+     * Query API rate limit configuration and usage for a user
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return Object containing:
+     *         {
+     *           cumVlm: str,            // Cumulative volume
+     *           nRequestsUsed: int,     // max(0, cumulative_used minus reserved)
+     *           nRequestsCap: int,      // Request capacity
+     *           nRequestsSurplus: int   // max(0, reserved minus cumulative_used)
+     *         }
+     */
+    nlohmann::json userRateLimit(const std::string& user);
+
+    /**
+     * Retrieve comprehensive portfolio performance data
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return Array of [period, data] pairs where period is one of:
+     *         "day", "week", "month", "allTime", "perpDay", "perpWeek",
+     *         "perpMonth", "perpAllTime"
+     *         Each data object contains:
+     *         {
+     *           accountValueHistory: [[timestamp, value_str], ...],
+     *           pnlHistory: [[timestamp, pnl_str], ...],
+     *           vlm: str
+     *         }
+     */
+    nlohmann::json portfolio(const std::string& user);
+
+    /**
+     * Retrieve non-funding ledger updates (deposits, withdrawals, transfers,
+     * liquidations, and other account activities excluding funding payments)
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @param start_time Start time in milliseconds (epoch timestamp)
+     * @param end_time Optional end time in milliseconds (epoch timestamp)
+     * @return Array of ledger update records
+     */
+    nlohmann::json userNonFundingLedgerUpdates(const std::string& user,
+                                                int64_t start_time,
+                                                std::optional<int64_t> end_time = std::nullopt);
+
+    /**
+     * Get vault details including portfolio history, followers, APR, commission
+     *
+     * @param vault_address Vault address in 42-character hexadecimal format
+     * @param user Optional user address to get follower-specific state
+     * @return Object containing:
+     *         {
+     *           name: str,
+     *           vaultAddress: str,
+     *           leader: str,
+     *           description: str,
+     *           portfolio: [[period, {accountValueHistory, pnlHistory, vlm}], ...],
+     *           apr: float,
+     *           followerState: null | {...},
+     *           leaderFraction: float,
+     *           leaderCommission: float,
+     *           followers: [{user, vaultEquity, pnl, allTimePnl, daysFollowing, ...}, ...],
+     *           maxDistributable: float,
+     *           maxWithdrawable: float,
+     *           isClosed: bool,
+     *           relationship: {type, data} | null,
+     *           allowDeposits: bool,
+     *           alwaysCloseOnWithdraw: bool
+     *         }
+     */
+    nlohmann::json vaultDetails(const std::string& vault_address,
+                                 const std::string& user = "");
+
+    /**
+     * Retrieve user's equity positions across all vaults
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return Array of vault equity objects:
+     *         [
+     *           {
+     *             vaultAddress: str,
+     *             equity: str
+     *           },
+     *           ...
+     *         ]
+     */
+    nlohmann::json userVaultEquities(const std::string& user);
+
+    /**
      * Manually register perpetual metadata
      * Users must call this to enable nameToAsset() for perp markets
      */

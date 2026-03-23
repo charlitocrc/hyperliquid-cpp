@@ -10,6 +10,7 @@ set(EXAMPLES
     historical_orders
     user_fees
     candles_snapshot
+    account_queries
 )
 
 foreach(EXAMPLE ${EXAMPLES})
