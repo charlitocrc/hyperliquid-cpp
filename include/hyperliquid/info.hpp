@@ -451,6 +451,23 @@ public:
     nlohmann::json userVaultEquities(const std::string& user);
 
     /**
+     * Query HIP-3 DEX abstraction state for a user
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return Boolean: true if DEX abstraction is enabled, false otherwise
+     */
+    nlohmann::json queryUserDexAbstractionState(const std::string& user);
+
+    /**
+     * Query user abstraction mode
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return String: one of "unifiedAccount", "portfolioMargin", "disabled",
+     *         "default", or "dexAbstraction"
+     */
+    nlohmann::json userAbstraction(const std::string& user);
+
+    /**
      * Manually register perpetual metadata
      * Users must call this to enable nameToAsset() for perp markets
      */

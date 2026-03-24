@@ -98,9 +98,9 @@ This document tracks features from the Python SDK that need to be implemented to
 
 ### Info Class - Advanced Queries
 
-- [ ] `userVaultEquities()` - Get vault equity positions (vaultAddress + equity per vault)
-- [ ] `queryUserDexAbstractionState()` - Get HIP-3 DEX abstraction state (bool)
-- [ ] `userAbstraction()` - Get user abstraction mode: "unifiedAccount", "portfolioMargin", "disabled", "default", or "dexAbstraction"
+- [x] `userVaultEquities()` - Get vault equity positions (vaultAddress + equity per vault)
+- [x] `queryUserDexAbstractionState()` - Get HIP-3 DEX abstraction state (bool)
+- [x] `userAbstraction()` - Get user abstraction mode: "unifiedAccount", "portfolioMargin", "disabled", "default", or "dexAbstraction"
 
 ---
 

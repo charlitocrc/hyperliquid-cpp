@@ -445,6 +445,22 @@ nlohmann::json Info::userVaultEquities(const std::string& user) {
     return post("/info", payload);
 }
 
+nlohmann::json Info::queryUserDexAbstractionState(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "userDexAbstraction"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::userAbstraction(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "userAbstraction"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
 nlohmann::json Info::userFundingHistory(const std::string& user,
                                         int64_t start_time,
                                         std::optional<int64_t> end_time) {

@@ -154,6 +154,24 @@ int main() {
         }
     }
 
+    // --- queryUserDexAbstractionState ---
+    std::cout << "\n=== DEX Abstraction State for " << address << " ===\n";
+    auto dex_abstraction = info.queryUserDexAbstractionState(address);
+    if (dex_abstraction.is_boolean()) {
+        std::cout << "  DEX abstraction enabled: " << (dex_abstraction.get<bool>() ? "yes" : "no") << "\n";
+    } else {
+        std::cout << "  DEX abstraction state: " << dex_abstraction.dump() << "\n";
+    }
+
+    // --- userAbstraction ---
+    std::cout << "\n=== User Abstraction Mode for " << address << " ===\n";
+    auto abstraction = info.userAbstraction(address);
+    if (abstraction.is_string()) {
+        std::cout << "  Mode: " << abstraction.get<std::string>() << "\n";
+    } else {
+        std::cout << "  Response: " << abstraction.dump() << "\n";
+    }
+
     // --- userVaultEquities ---
     std::cout << "\n=== Vault Equities for " << address << " ===\n";
     auto vault_equities = info.userVaultEquities(address);
