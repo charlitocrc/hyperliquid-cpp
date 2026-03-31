@@ -465,7 +465,45 @@ public:
      * @return String: one of "unifiedAccount", "portfolioMargin", "disabled",
      *         "default", or "dexAbstraction"
      */
-    nlohmann::json userAbstraction(const std::string& user);
+    nlohmann::json queryUserAbstractionState(const std::string& user);
+
+    /**
+     * Retrieve perpetuals metadata and asset contexts (mark price, funding, OI, etc.)
+     *
+     * @param dex Perp dex name. Defaults to empty string (first perp dex).
+     * @return 2-element array:
+     *         [0]: Meta object {universe, marginTables, collateralToken}
+     *         [1]: Array of asset contexts, one per universe entry:
+     *              {dayNtlVlm, funding, impactPxs, markPx, midPx,
+     *               openInterest, oraclePx, premium, prevDayPx}
+     */
+    nlohmann::json metaAndAssetCtxs(const std::string& dex = "");
+
+    /**
+     * Retrieve spot metadata and asset contexts
+     *
+     * @return 2-element array:
+     *         [0]: SpotMeta {tokens, universe}
+     *         [1]: Array of spot asset contexts:
+     *              {dayNtlVlm, markPx, midPx, prevDayPx, circulatingSupply, coin}
+     */
+    nlohmann::json spotMetaAndAssetCtxs();
+
+    /**
+     * Retrieve all perpetual dexes
+     *
+     * @return Array where [0] is null (default dex) and subsequent entries are:
+     *         {name, fullName, deployer, oracleUpdater, feeRecipient,
+     *          assetToStreamingOiCap, assetToFundingMultiplier}
+     */
+    nlohmann::json perpDexs();
+
+    /**
+     * Retrieve perp deploy auction status
+     *
+     * @return Object: {startTimeSeconds, durationSeconds, startGas, currentGas, endGas}
+     */
+    nlohmann::json queryPerpDeployAuctionStatus();
 
     /**
      * Manually register perpetual metadata

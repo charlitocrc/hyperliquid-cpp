@@ -453,10 +453,41 @@ nlohmann::json Info::queryUserDexAbstractionState(const std::string& user) {
     return post("/info", payload);
 }
 
-nlohmann::json Info::userAbstraction(const std::string& user) {
+nlohmann::json Info::queryUserAbstractionState(const std::string& user) {
     nlohmann::json payload = {
         {"type", "userAbstraction"},
         {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::metaAndAssetCtxs(const std::string& dex) {
+    nlohmann::json payload = {
+        {"type", "metaAndAssetCtxs"}
+    };
+    if (!dex.empty()) {
+        payload["dex"] = dex;
+    }
+    return post("/info", payload);
+}
+
+nlohmann::json Info::spotMetaAndAssetCtxs() {
+    nlohmann::json payload = {
+        {"type", "spotMetaAndAssetCtxs"}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::perpDexs() {
+    nlohmann::json payload = {
+        {"type", "perpDexs"}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::queryPerpDeployAuctionStatus() {
+    nlohmann::json payload = {
+        {"type", "perpDeployAuctionStatus"}
     };
     return post("/info", payload);
 }

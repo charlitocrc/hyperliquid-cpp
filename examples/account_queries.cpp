@@ -163,9 +163,9 @@ int main() {
         std::cout << "  DEX abstraction state: " << dex_abstraction.dump() << "\n";
     }
 
-    // --- userAbstraction ---
+    // --- queryUserAbstractionState ---
     std::cout << "\n=== User Abstraction Mode for " << address << " ===\n";
-    auto abstraction = info.userAbstraction(address);
+    auto abstraction = info.queryUserAbstractionState(address);
     if (abstraction.is_string()) {
         std::cout << "  Mode: " << abstraction.get<std::string>() << "\n";
     } else {
