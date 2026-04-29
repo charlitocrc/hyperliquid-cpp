@@ -54,8 +54,8 @@ This document tracks features from the Python SDK that need to be implemented to
 
 ### Exchange Class - Margin & Account
 
-- [ ] `updateIsolatedMargin()` - Adjust isolated margin amount for position
-- [ ] `setExpiresAfter()` - Set expiration time for actions (partial implementation exists)
+- [x] `updateIsolatedMargin()` - Adjust isolated margin amount for position
+- [x] `setExpiresAfter()` - Set expiration time for actions
 
 ### Exchange Class - Sub-Accounts
 
@@ -375,7 +375,7 @@ This document tracks features from the Python SDK that need to be implemented to
 | Schedule Cancel | ✅ | ❌ | TODO |
 | **Account Management** |
 | Leverage Update | ✅ | ✅ | Complete |
-| Isolated Margin | ✅ | ❌ | TODO |
+| Isolated Margin | ✅ | ✅ | Complete |
 | Transfers (USD/Spot) | ✅ | ✅ | Complete |
 | Vault Transfers | ✅ | ❌ | TODO |
 | Sub-Accounts | ✅ | ❌ | TODO |

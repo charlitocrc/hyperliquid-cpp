@@ -402,6 +402,27 @@ nlohmann::json Exchange::updateLeverage(int leverage,
     return postAction(action, signature, timestamp);
 }
 
+nlohmann::json Exchange::updateIsolatedMargin(double amount, const std::string& coin) {
+    int asset = info_.nameToAsset(coin);
+    int64_t ntli = floatToUsdInt(amount);
+
+    nlohmann::ordered_json action;
+    action["type"] = "updateIsolatedMargin";
+    action["asset"] = asset;
+    action["isBuy"] = true;
+    action["ntli"] = ntli;
+
+    int64_t timestamp = getTimestampMs();
+    bool is_mainnet = (base_url_ == MAINNET_API_URL);
+
+    std::optional<std::string> vault_opt = vault_address_.empty() ?
+        std::nullopt : std::optional<std::string>(vault_address_);
+    auto signature = signL1Action(*wallet_, action, vault_opt, timestamp,
+                                 expires_after_, is_mainnet);
+
+    return postAction(action, signature, timestamp);
+}
+
 nlohmann::json Exchange::scheduleCancel(std::optional<int64_t> time) {
     int64_t timestamp = getTimestampMs();
 

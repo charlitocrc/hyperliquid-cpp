@@ -140,6 +140,13 @@ public:
     nlohmann::json queryOrderByCloid(const std::string& user, const Cloid& cloid);
 
     /**
+     * Update isolated margin for a position.
+     * @param amount Amount in USD to add (positive) or remove (negative)
+     * @param coin Coin name (e.g. "ETH")
+     */
+    nlohmann::json updateIsolatedMargin(double amount, const std::string& coin);
+
+    /**
      * Set expiration time for actions (optional)
      */
     void setExpiresAfter(std::optional<int64_t> expires_after);
