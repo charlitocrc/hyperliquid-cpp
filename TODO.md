@@ -16,7 +16,48 @@ This document tracks features from the Python SDK that need to be implemented to
 - ✅ Wallet management with ECDSA secp256k1
 - ✅ 4 working examples
 
-**Missing Features:** ~90+ methods and WebSocket support
+**Missing Features:** WebSocket support plus remaining unchecked parity items
+
+## 2026-05-14 Python SDK Method Audit
+
+Method names below are normalized from Python `snake_case` to C++ `camelCase`.
+This section captures Python SDK methods/functions that were not explicitly
+named in this TODO before the audit.
+
+### Newly Untracked C++ Parity Gaps
+
+- [ ] `extraAgents()` - Python SDK account query using `type: "extraAgents"`; do not confuse with API-doc `approvedBuilders()`
+- [ ] `agentSetAbstraction()` - Set agent abstraction mode (`"u"`, `"p"`, or `"i"`)
+- [ ] `userSetAbstraction()` - Set user abstraction mode (`"unifiedAccount"`, `"portfolioMargin"`, or `"disabled"`)
+- [ ] `gossipPriorityBid()` - Submit gossip priority bid action
+- [ ] `signUserSetAbstractionAction()` - Specialized user abstraction-mode signing helper
+- [ ] `setPerpMeta()` - Expose Python-compatible manual perp metadata cache update, or document `registerPerpMeta()` as the C++ equivalent
+- [ ] `bulkModifyOrdersNew()` - Exact Python method-name parity; C++ currently exposes `bulkModifyOrders()`
+- [ ] `spotDeployTokenActionInner()` - Shared spot deploy helper exposed by Python SDK
+- [ ] `cSignerInner()` - Shared validator signer jail/unjail helper exposed by Python SDK
+- [ ] `orderTypeToWire()` - Python signing helper for converting public order type to wire format
+- [ ] `signInner()` - Shared typed-data signing helper
+- [ ] `getDex()` - Python `_get_dex` helper for perp dex-prefixed coins
+- [ ] `remapCoinSubscription()` - Python `_remap_coin_subscription` helper for WebSocket subscription names
+
+### WebSocket Helper Methods Also Missing
+
+- [ ] `subscriptionToIdentifier()` - Convert a subscription object to callback-routing key
+- [ ] `wsMsgToIdentifier()` - Convert incoming WebSocket message to callback-routing key
+- [ ] `run()` - WebSocket thread/event-loop entrypoint
+- [ ] `sendPing()` - Periodic WebSocket ping loop
+- [ ] `stop()` - Stop and close WebSocket manager
+- [ ] `onMessage()` - WebSocket inbound message handler
+- [ ] `onOpen()` - WebSocket connection-open handler and queued subscription flusher
+
+### Implemented But Previously Omitted As Individual Rows
+
+- [x] `post()` / `handleException()` - API request and error handling surface
+- [x] Info queries: `userState()`, `openOrders()`, `allMids()`, `userFills()`, `meta()`, `spotMeta()`, `l2Snapshot()`, `queryOrderByOid()`, `queryUserAbstractionState()`, `nameToAsset()`
+- [x] Exchange methods: `order()`, `bulkOrders()`, `modifyOrder()`, `marketOpen()`, `marketClose()`, `cancel()`, `cancelByCloid()`, `bulkCancel()`, `bulkCancelByCloid()`, `updateLeverage()`, `usdTransfer()`, `spotTransfer()`
+- [x] Exchange internal helpers: `postAction()`, `slippagePrice()`
+- [x] Signing/conversion helpers: `actionHash()`, `constructPhantomAgent()`, `l1Payload()`, `userSignedPayload()`, `signL1Action()`, `floatToWire()`, `getTimestampMs()`, `orderRequestToOrderWire()`, `orderWiresToOrderAction()`
+- [x] `Cloid` helpers: `fromInt()`, `fromStr()`, `toRaw()`, `validate()`
 
 ---
 
@@ -26,6 +67,7 @@ This document tracks features from the Python SDK that need to be implemented to
 
 - [x] `scheduleCancel()` - Schedule future cancel of all orders for a coin
 - [x] `queryOrderByCloid()` - Query order status by client order ID (also available in Info class)
+- [ ] `bulkModifyOrdersNew()` - Exact Python SDK method-name parity alias for bulk order modification
 
 ### Info Class - Essential Queries
 
@@ -74,7 +116,8 @@ This document tracks features from the Python SDK that need to be implemented to
 
 - [x] `querySubAccounts()` - Get list of sub-accounts with clearinghouse and spot state
 - [x] `queryReferralState()` - Get referral code, cumulative VLM, unclaimed/claimed rewards, and referral history
-- [x] `approvedBuilders()` - Get list of approved builder addresses for user (was `extraAgents`)
+- [x] `approvedBuilders()` - Get approved builder addresses for user (API-doc query, not in current Python SDK)
+- [ ] `extraAgents()` - Get extra agent names, addresses, and validity timestamps (current Python SDK method)
 - [x] `userRole()` - Get user role: "missing", "user", "agent", "vault", or "subAccount"
 - [x] `userRateLimit()` - Get API rate limit (cumVlm, nRequestsUsed, nRequestsCap, nRequestsSurplus)
 - [x] `portfolio()` - Get portfolio performance history (day/week/month/allTime/perpDay/perpWeek/perpMonth/perpAllTime)
@@ -95,12 +138,14 @@ This document tracks features from the Python SDK that need to be implemented to
 
 - [ ] `userDexAbstraction()` - Enable/disable dex abstraction mode
 - [ ] `agentEnableDexAbstraction()` - Enable dex abstraction for agent
+- [ ] `agentSetAbstraction()` - Set agent abstraction mode (`"u"`, `"p"`, or `"i"`)
+- [ ] `userSetAbstraction()` - Set user abstraction mode (`"unifiedAccount"`, `"portfolioMargin"`, or `"disabled"`)
 
 ### Info Class - Advanced Queries
 
 - [x] `userVaultEquities()` - Get vault equity positions (vaultAddress + equity per vault)
 - [x] `queryUserDexAbstractionState()` - Get HIP-3 DEX abstraction state (bool)
-- [x] `userAbstraction()` - Get user abstraction mode: "unifiedAccount", "portfolioMargin", "disabled", "default", or "dexAbstraction"
+- [x] `queryUserAbstractionState()` - Get user abstraction mode: "unifiedAccount", "portfolioMargin", "disabled", "default", or "dexAbstraction"
 
 ---
 
@@ -155,16 +200,16 @@ This document tracks features from the Python SDK that need to be implemented to
 
 ### Info Class - Perp Deployment Queries
 
-- [ ] `metaAndAssetCtxs()` - Get meta with asset contexts
-- [ ] `spotMetaAndAssetCtxs()` - Get spot meta with asset contexts
-- [ ] `perpDexs()` - Get available perp dexes
-- [ ] `queryPerpDeployAuctionStatus()` - Get perp deployment auction status
+- [x] `metaAndAssetCtxs()` - Get meta with asset contexts
+- [x] `spotMetaAndAssetCtxs()` - Get spot meta with asset contexts
+- [x] `perpDexs()` - Get available perp dexes
+- [x] `queryPerpDeployAuctionStatus()` - Get perp deployment auction status
 
 ---
 
 ## Low Priority - Validator & Staking
 
-### Exchange Class - Validator Operations (4 methods)
+### Exchange Class - Validator Operations (5 methods)
 
 - [ ] `cValidatorRegister()` - Register as validator
 - [ ] `cValidatorChangeProfile()` - Update validator profile
@@ -201,20 +246,32 @@ This document tracks features from the Python SDK that need to be implemented to
 
 - [ ] `useBigBlocks()` - Enable/disable big blocks mode for trading
 - [ ] `noop()` - No-operation action (for testing)
+- [ ] `gossipPriorityBid()` - Submit gossip priority bid action
+
+### Python SDK Helper Method Parity
+
+- [ ] `setPerpMeta()` - Python-compatible manual perp metadata cache update (or document `registerPerpMeta()` equivalence)
+- [ ] `spotDeployTokenActionInner()` - Shared spot deploy helper exposed by Python SDK
+- [ ] `cSignerInner()` - Shared validator signer jail/unjail helper exposed by Python SDK
+- [ ] `getDex()` - Helper for extracting dex prefix from coin names
+- [ ] `remapCoinSubscription()` - Helper for WebSocket subscription coin remapping
 
 ### Signing Utilities - Additional Signing Functions
 
-- [ ] `signUserSignedAction()` - Sign user-signed actions (non-L1)
+- [x] `signUserSignedAction()` - Sign user-signed actions (non-L1)
 - [ ] `signUsdTransferAction()` - Specialized USD transfer signing
 - [ ] `signSpotTransferAction()` - Specialized spot transfer signing
 - [ ] `signWithdrawFromBridgeAction()` - Specialized bridge withdrawal signing
 - [ ] `signUsdClassTransferAction()` - Specialized USD class transfer signing
 - [ ] `signSendAssetAction()` - Specialized asset send signing
 - [ ] `signUserDexAbstractionAction()` - Specialized dex abstraction signing
+- [ ] `signUserSetAbstractionAction()` - Specialized user abstraction-mode signing
 - [ ] `signConvertToMultiSigUserAction()` - Specialized multi-sig conversion signing
 - [ ] `signAgent()` - Specialized agent approval signing
 - [ ] `signApproveBuilderFee()` - Specialized builder fee signing
 - [ ] `signTokenDelegateAction()` - Specialized token delegation signing
+- [ ] `orderTypeToWire()` - Convert public order type to wire format
+- [ ] `signInner()` - Shared typed-data signing helper
 
 ### Signing Utilities - Recovery Functions
 
@@ -224,8 +281,8 @@ This document tracks features from the Python SDK that need to be implemented to
 ### Conversion Utilities
 
 - [ ] `floatToIntForHashing()` - Convert to 8-decimal int for hashing
-- [ ] `floatToUsdInt()` - Convert to 6-decimal USD int
-- [ ] `floatToInt()` - Generic float to int with precision
+- [x] `floatToUsdInt()` - Convert to 6-decimal USD int
+- [x] `floatToInt()` - Generic float to int with precision
 - [ ] `addressToBytes()` - Convert hex address to bytes
 
 ---
@@ -263,6 +320,13 @@ This document tracks features from the Python SDK that need to be implemented to
 - [ ] `subscribe()` - Subscribe to real-time data channel
 - [ ] `unsubscribe()` - Unsubscribe from channel
 - [ ] `disconnectWebsocket()` - Close WebSocket connection cleanly
+- [ ] `subscriptionToIdentifier()` - Convert subscription payload to routing key
+- [ ] `wsMsgToIdentifier()` - Convert incoming message to routing key
+- [ ] `run()` - WebSocket thread/event-loop entrypoint
+- [ ] `sendPing()` - Periodic ping loop
+- [ ] `stop()` - Stop and close WebSocket manager
+- [ ] `onMessage()` - Inbound message handler
+- [ ] `onOpen()` - Connection-open handler and queued subscription flusher
 
 ### WebSocket Message Types (Type Definitions)
 
@@ -461,7 +525,7 @@ When implementing features from this TODO:
 
 ## Notes
 
-- **Total Methods Missing**: ~90+ methods across Exchange and Info classes
+- **Total Methods Missing**: See unchecked parity items above; the 2026-05-14 audit added Python SDK methods that were not previously named here
 - **WebSocket**: Complete real-time data infrastructure needed
 - **Priority**: Focus on high/medium priority items first - they cover 80% of use cases
 - **Low Priority**: Specialized features (validators, token deployment) can wait
@@ -469,6 +533,6 @@ When implementing features from this TODO:
 
 ---
 
-**Last Updated**: 2025-12-27
+**Last Updated**: 2026-05-14
 **C++ SDK Version**: 1.0.0
 **Python SDK Version**: Based on latest main branch
