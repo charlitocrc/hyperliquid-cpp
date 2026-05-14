@@ -17,8 +17,8 @@ protected:
     /**
      * POST request to API endpoint
      */
-    nlohmann::json post(const std::string& url_path,
-                       const nlohmann::json& payload = nlohmann::json::object());
+    virtual nlohmann::json post(const std::string& url_path,
+                                const nlohmann::json& payload = nlohmann::json::object());
 
     std::string base_url_;
     int timeout_ms_;

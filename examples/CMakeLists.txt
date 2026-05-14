@@ -11,6 +11,7 @@ set(EXAMPLES
     user_fees
     candles_snapshot
     account_queries
+    info_perp_deployment_queries
 )
 
 foreach(EXAMPLE ${EXAMPLES})
