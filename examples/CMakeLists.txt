@@ -15,6 +15,7 @@ set(EXAMPLES
     twap_order
     rate_limits_margin
     usd_class_transfer
+    send_asset
 )
 
 foreach(EXAMPLE ${EXAMPLES})

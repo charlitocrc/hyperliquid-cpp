@@ -156,6 +156,31 @@ public:
                                const std::string& token);
 
     /**
+     * Transfer a token between dexes (e.g. spot <-> a perp dex, or between
+     * perp dexes) for the same account.
+     *
+     * Dex names: "" is the default perp dex, "spot" is spot. When transferring
+     * to or from a perp dex, the token must be that dex's collateral token.
+     * Token uses the same "NAME:0x<token-id>" form as spotTransfer.
+     *
+     * User-signed action (EIP-712) carrying its own nonce and no vaultAddress
+     * field. When the Exchange was constructed with a vault/subaccount
+     * address, it is sent as the signed fromSubAccount field, matching the
+     * Python SDK.
+     *
+     * @param destination Recipient address (42-char hex)
+     * @param source_dex Dex to send from ("" = default perp dex, "spot" = spot)
+     * @param destination_dex Dex to send to
+     * @param token Token name, e.g. "USDC:0x..." or plain collateral token name
+     * @param amount Amount of the token to send
+     */
+    nlohmann::json sendAsset(const std::string& destination,
+                            const std::string& source_dex,
+                            const std::string& destination_dex,
+                            const std::string& token,
+                            double amount);
+
+    /**
      * Transfer USDC between the spot and perp balances of the same account.
      *
      * User-signed action (EIP-712), so it carries its own nonce and no

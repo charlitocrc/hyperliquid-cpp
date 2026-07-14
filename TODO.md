@@ -15,9 +15,9 @@ docs (Info / Exchange / WebSocket endpoints) and cross-checked against the reque
   `userFees`, `userRole`, `userRateLimit`, `userTwapSliceFills`, `userVaultEquities`, `vaultDetails`,
   `subAccounts`, `referral`, `portfolio`, `maxBuilderFee`, `approvedBuilders`, `userDexAbstraction`,
   `userAbstraction`
-- Exchange (15 actions): `order`, `cancel`, `cancelByCloid`, `modify`, `batchModify`, `scheduleCancel`,
+- Exchange (16 actions): `order`, `cancel`, `cancelByCloid`, `modify`, `batchModify`, `scheduleCancel`,
   `updateLeverage`, `updateIsolatedMargin`, `topUpIsolatedOnlyMargin`, `usdSend`, `spotSend`,
-  `usdClassTransfer`, `twapOrder`, `twapCancel`, `reserveRequestWeight`
+  `usdClassTransfer`, `sendAsset`, `twapOrder`, `twapCancel`, `reserveRequestWeight`
 - Market orders (`marketOpen` / `marketClose`), EIP-712 signing, ECDSA secp256k1 wallet,
   automatic tick/lot rounding, `setExpiresAfter`
 - 4 working examples
@@ -137,7 +137,10 @@ Neither exists in the Python SDK; implemented from the docs directly, like TWAP.
       vault/subaccount rides in the signed amount as `"<amount> subaccount:<addr>"`.
       Added EIP-712 `bool` encoding for `toPerp`; signature pinned against the Python SDK
       in `tests/usd_class_transfer_test.cpp`. Example in `examples/usd_class_transfer.cpp`.
-- [ ] `sendAsset()` - action `sendAsset`; between dexes
+- [x] `sendAsset()` - action `sendAsset`; between dexes ("" = default perp dex, "spot" = spot).
+      User-signed (`HyperliquidTransaction:SendAsset`); no vaultAddress field — a configured
+      vault/subaccount is sent as the signed `fromSubAccount` field. Signature pinned against
+      the Python SDK in `tests/send_asset_test.cpp`. Example in `examples/send_asset.cpp`.
 - [ ] `agentSendAsset()` - action `agentSendAsset`
 - [ ] `sendToEvmWithData()` - action `sendToEvmWithData`; HyperCore → HyperEVM with calldata
 - [ ] `withdraw3()` - action `withdraw3`; bridge withdrawal (tracked previously as

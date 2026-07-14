@@ -3,6 +3,7 @@ set(TESTS
     twap_orders_test
     rate_limits_margin_test
     usd_class_transfer_test
+    send_asset_test
     l1_action_signing_test
 )
 
