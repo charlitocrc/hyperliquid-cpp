@@ -15,9 +15,10 @@ docs (Info / Exchange / WebSocket endpoints) and cross-checked against the reque
   `userFees`, `userRole`, `userRateLimit`, `userTwapSliceFills`, `userVaultEquities`, `vaultDetails`,
   `subAccounts`, `referral`, `portfolio`, `maxBuilderFee`, `approvedBuilders`, `userDexAbstraction`,
   `userAbstraction`
-- Exchange (16 actions): `order`, `cancel`, `cancelByCloid`, `modify`, `batchModify`, `scheduleCancel`,
+- Exchange (17 actions): `order`, `cancel`, `cancelByCloid`, `modify`, `batchModify`, `scheduleCancel`,
   `updateLeverage`, `updateIsolatedMargin`, `topUpIsolatedOnlyMargin`, `usdSend`, `spotSend`,
-  `usdClassTransfer`, `sendAsset`, `twapOrder`, `twapCancel`, `reserveRequestWeight`
+  `usdClassTransfer`, `sendAsset`, `twapOrder`, `twapCancel`, `reserveRequestWeight`,
+  `approveBuilderFee`
 - Market orders (`marketOpen` / `marketClose`), EIP-712 signing, ECDSA secp256k1 wallet,
   automatic tick/lot rounding, `setExpiresAfter`
 - 4 working examples
@@ -160,7 +161,10 @@ Neither exists in the Python SDK; implemented from the docs directly, like TWAP.
 ### Agents, Referrals, Builders
 
 - [ ] `approveAgent()` - action `approveAgent`
-- [ ] `approveBuilderFee()` - action `approveBuilderFee`
+- [x] `approveBuilderFee()` - action `approveBuilderFee`. User-signed
+      (`HyperliquidTransaction:ApproveBuilderFee`); `builder` is an EIP-712 `address` field —
+      first use of that encoding, signature pinned against the Python SDK in
+      `tests/approve_builder_fee_test.cpp`. Example in `examples/approve_builder_fee.cpp`.
 - [ ] `setReferrer()`
 
 ### Abstraction
@@ -379,7 +383,7 @@ Our `Meta` type does not model any of these.
 | WebSocket (24 subscriptions) | ✅ | ❌ | TODO |
 | WebSocket POST requests | ✅ | ❌ | TODO |
 | **Advanced** |
-| Agents / Referrals / Builders | ✅ | ⚠️ | Read-only (`approvedBuilders`, `maxBuilderFee`) |
+| Agents / Referrals / Builders | ✅ | ⚠️ | Partial (`approveBuilderFee` + read queries; `approveAgent`, `setReferrer` missing) |
 | Dex Abstraction | ✅ | ⚠️ | Read-only (queries done, actions missing) |
 | Staking | ✅ | ❌ | TODO |
 | Prediction Markets / Outcomes | ✅ | ❌ | TODO |

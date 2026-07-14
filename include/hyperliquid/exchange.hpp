@@ -194,6 +194,22 @@ public:
     nlohmann::json usdClassTransfer(double amount, bool to_perp);
 
     /**
+     * Approve a maximum builder fee rate for a builder address, allowing that
+     * builder to attach fees up to the rate on orders placed through it
+     * (the BuilderInfo parameter of order()/bulkOrders()).
+     *
+     * Check the currently approved rate with info_.maxBuilderFee(user, builder).
+     *
+     * User-signed action (EIP-712, HyperliquidTransaction:ApproveBuilderFee),
+     * so it must be signed by the account's own wallet, not an agent wallet.
+     *
+     * @param builder Builder address (42-char hex)
+     * @param max_fee_rate Maximum fee rate as a percent string, e.g. "0.001%"
+     */
+    nlohmann::json approveBuilderFee(const std::string& builder,
+                                    const std::string& max_fee_rate);
+
+    /**
      * Update leverage for a coin
      */
     nlohmann::json updateLeverage(int leverage,

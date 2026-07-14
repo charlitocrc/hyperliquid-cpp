@@ -16,6 +16,7 @@ set(EXAMPLES
     rate_limits_margin
     usd_class_transfer
     send_asset
+    approve_builder_fee
 )
 
 foreach(EXAMPLE ${EXAMPLES})

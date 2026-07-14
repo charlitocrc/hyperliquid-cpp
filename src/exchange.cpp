@@ -459,6 +459,30 @@ nlohmann::json Exchange::usdClassTransfer(double amount, bool to_perp) {
     return postAction(action, signature, action["nonce"]);
 }
 
+nlohmann::json Exchange::approveBuilderFee(const std::string& builder,
+                                           const std::string& max_fee_rate) {
+    nlohmann::json action = {
+        {"type", "approveBuilderFee"},
+        {"maxFeeRate", max_fee_rate},
+        {"builder", builder},
+        {"nonce", getTimestampMs()}
+    };
+
+    std::vector<EIP712Type> payload_types = {
+        {"hyperliquidChain", "string"},
+        {"maxFeeRate", "string"},
+        {"builder", "address"},
+        {"nonce", "uint64"}
+    };
+
+    bool is_mainnet = (base_url_ == MAINNET_API_URL);
+    auto signature = signUserSignedAction(*wallet_, action, payload_types,
+                                         "HyperliquidTransaction:ApproveBuilderFee",
+                                         is_mainnet);
+
+    return postAction(action, signature, action["nonce"]);
+}
+
 nlohmann::json Exchange::updateLeverage(int leverage,
                                         const std::string& coin,
                                         bool is_cross) {

@@ -4,6 +4,7 @@ set(TESTS
     rate_limits_margin_test
     usd_class_transfer_test
     send_asset_test
+    approve_builder_fee_test
     l1_action_signing_test
 )
 
