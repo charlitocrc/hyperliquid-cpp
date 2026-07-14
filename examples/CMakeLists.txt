@@ -17,6 +17,7 @@ set(EXAMPLES
     usd_class_transfer
     send_asset
     approve_builder_fee
+    approve_agent
 )
 
 foreach(EXAMPLE ${EXAMPLES})

@@ -5,6 +5,7 @@ set(TESTS
     usd_class_transfer_test
     send_asset_test
     approve_builder_fee_test
+    approve_agent_test
     l1_action_signing_test
 )
 

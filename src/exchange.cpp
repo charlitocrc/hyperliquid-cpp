@@ -1,6 +1,7 @@
 #include "hyperliquid/exchange.hpp"
 #include "hyperliquid/utils/constants.hpp"
 #include "hyperliquid/utils/conversions.hpp"
+#include <openssl/rand.h>
 #include <cmath>
 #include <stdexcept>
 
@@ -457,6 +458,44 @@ nlohmann::json Exchange::usdClassTransfer(double amount, bool to_perp) {
                                          is_mainnet);
 
     return postAction(action, signature, action["nonce"]);
+}
+
+std::pair<nlohmann::json, std::string> Exchange::approveAgent(
+    const std::optional<std::string>& name) {
+    // Generate the agent key locally, like the Python SDK: 32 random bytes
+    // from the CSPRNG, returned to the caller as the only copy.
+    std::vector<uint8_t> key_bytes(32);
+    if (RAND_bytes(key_bytes.data(), static_cast<int>(key_bytes.size())) != 1) {
+        throw std::runtime_error("Failed to generate agent private key");
+    }
+    std::string agent_key = bytesToHex(key_bytes, /*with_prefix=*/true);
+    std::string agent_address = Wallet::fromPrivateKey(agent_key)->address();
+
+    nlohmann::json action = {
+        {"type", "approveAgent"},
+        {"agentAddress", agent_address},
+        {"agentName", name.value_or("")},
+        {"nonce", getTimestampMs()}
+    };
+
+    std::vector<EIP712Type> payload_types = {
+        {"hyperliquidChain", "string"},
+        {"agentAddress", "address"},
+        {"agentName", "string"},
+        {"nonce", "uint64"}
+    };
+
+    bool is_mainnet = (base_url_ == MAINNET_API_URL);
+    auto signature = signUserSignedAction(*wallet_, action, payload_types,
+                                         "HyperliquidTransaction:ApproveAgent",
+                                         is_mainnet);
+
+    // Signed with agentName "" but sent without it, matching the Python SDK.
+    if (!name.has_value()) {
+        action.erase("agentName");
+    }
+
+    return {postAction(action, signature, action["nonce"]), agent_key};
 }
 
 nlohmann::json Exchange::approveBuilderFee(const std::string& builder,

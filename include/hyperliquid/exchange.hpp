@@ -5,8 +5,9 @@
 #include "hyperliquid/types.hpp"
 #include "hyperliquid/utils/signing.hpp"
 #include <memory>
-#include <vector>
 #include <optional>
+#include <utility>
+#include <vector>
 
 namespace hyperliquid {
 
@@ -192,6 +193,29 @@ public:
      * @param to_perp true: spot -> perp, false: perp -> spot
      */
     nlohmann::json usdClassTransfer(double amount, bool to_perp);
+
+    /**
+     * Approve an agent (API) wallet that can sign L1 actions (orders, cancels,
+     * ...) on behalf of this account, without being able to transfer funds.
+     *
+     * A fresh agent private key is generated locally, its address is approved,
+     * and the key is returned alongside the API response. Persist the key —
+     * it is shown nowhere else. Use it later via
+     * Wallet::fromPrivateKey(agent_key).
+     *
+     * Python SDK parity note: the action is always signed with an agentName
+     * field ("" when unnamed), but the field is omitted from the wire when no
+     * name was given. An unnamed agent replaces the previous unnamed agent;
+     * named agents coexist (the API caps how many).
+     *
+     * User-signed action (EIP-712, HyperliquidTransaction:ApproveAgent), so it
+     * must be signed by the account's own wallet, not another agent wallet.
+     *
+     * @param name Optional agent name. nullopt approves an unnamed agent.
+     * @return {API response, generated agent private key ("0x" + 64 hex)}
+     */
+    std::pair<nlohmann::json, std::string> approveAgent(
+        const std::optional<std::string>& name = std::nullopt);
 
     /**
      * Approve a maximum builder fee rate for a builder address, allowing that
