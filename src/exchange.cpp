@@ -51,6 +51,18 @@ nlohmann::json Exchange::postAction(const nlohmann::json& action,
     return post("/exchange", payload);
 }
 
+nlohmann::json Exchange::postL1Action(const nlohmann::ordered_json& action) {
+    const int64_t nonce = getTimestampMs();
+
+    std::optional<std::string> vault_opt = vault_address_.empty() ?
+        std::nullopt : std::optional<std::string>(vault_address_);
+
+    auto signature = signL1Action(*wallet_, action, vault_opt, nonce,
+                                 expires_after_, base_url_ == MAINNET_API_URL);
+
+    return postAction(action, signature, nonce);
+}
+
 double Exchange::slippagePrice(const std::string& name,
                               bool is_buy,
                               double slippage,
@@ -125,21 +137,7 @@ nlohmann::json Exchange::bulkOrders(const std::vector<OrderRequest>& orders,
         order_wires.push_back(orderRequestToOrderWire(rounded_order, asset));
     }
 
-    int64_t timestamp = getTimestampMs();
-
-    // Create order action
-    auto action = orderWiresToOrderAction(order_wires, builder, grouping);
-
-    // Determine if mainnet
-    bool is_mainnet = (base_url_ == MAINNET_API_URL);
-
-    // Sign action
-    std::optional<std::string> vault_opt = vault_address_.empty() ?
-        std::nullopt : std::optional<std::string>(vault_address_);
-    auto signature = signL1Action(*wallet_, action, vault_opt, timestamp,
-                                 expires_after_, is_mainnet);
-
-    return postAction(action, signature, timestamp);
+    return postL1Action(orderWiresToOrderAction(order_wires, builder, grouping));
 }
 
 nlohmann::json Exchange::marketOpen(const std::string& coin,
@@ -216,15 +214,7 @@ nlohmann::json Exchange::bulkCancel(const std::vector<CancelRequest>& cancels) {
     action["type"] = "cancel";
     action["cancels"] = cancels_array;
 
-    int64_t timestamp = getTimestampMs();
-    bool is_mainnet = (base_url_ == MAINNET_API_URL);
-
-    std::optional<std::string> vault_opt = vault_address_.empty() ?
-        std::nullopt : std::optional<std::string>(vault_address_);
-    auto signature = signL1Action(*wallet_, action, vault_opt, timestamp,
-                                 expires_after_, is_mainnet);
-
-    return postAction(action, signature, timestamp);
+    return postL1Action(action);
 }
 
 nlohmann::json Exchange::bulkCancelByCloid(const std::vector<CancelByCloidRequest>& cancels) {
@@ -241,15 +231,7 @@ nlohmann::json Exchange::bulkCancelByCloid(const std::vector<CancelByCloidReques
     action["type"] = "cancel";
     action["cancels"] = cancels_array;
 
-    int64_t timestamp = getTimestampMs();
-    bool is_mainnet = (base_url_ == MAINNET_API_URL);
-
-    std::optional<std::string> vault_opt = vault_address_.empty() ?
-        std::nullopt : std::optional<std::string>(vault_address_);
-    auto signature = signL1Action(*wallet_, action, vault_opt, timestamp,
-                                 expires_after_, is_mainnet);
-
-    return postAction(action, signature, timestamp);
+    return postL1Action(action);
 }
 
 nlohmann::json Exchange::modifyOrder(const OidOrCloid& oid,
@@ -311,15 +293,7 @@ nlohmann::json Exchange::bulkModifyOrders(const std::vector<ModifyRequest>& modi
     action["type"] = "batchModify";
     action["modifies"] = modifies_array;
 
-    int64_t timestamp = getTimestampMs();
-    bool is_mainnet = (base_url_ == MAINNET_API_URL);
-
-    std::optional<std::string> vault_opt = vault_address_.empty() ?
-        std::nullopt : std::optional<std::string>(vault_address_);
-    auto signature = signL1Action(*wallet_, action, vault_opt, timestamp,
-                                 expires_after_, is_mainnet);
-
-    return postAction(action, signature, timestamp);
+    return postL1Action(action);
 }
 
 nlohmann::json Exchange::twapOrder(const std::string& coin,
@@ -356,34 +330,16 @@ nlohmann::json Exchange::twapOrder(const std::string& coin,
     action["type"] = "twapOrder";
     action["twap"] = twap.toJson();
 
-    int64_t timestamp = getTimestampMs();
-    bool is_mainnet = (base_url_ == MAINNET_API_URL);
-
-    std::optional<std::string> vault_opt = vault_address_.empty() ?
-        std::nullopt : std::optional<std::string>(vault_address_);
-    auto signature = signL1Action(*wallet_, action, vault_opt, timestamp,
-                                 expires_after_, is_mainnet);
-
-    return postAction(action, signature, timestamp);
+    return postL1Action(action);
 }
 
 nlohmann::json Exchange::twapCancel(const std::string& coin, int64_t twap_id) {
-    int asset = info_.nameToAsset(coin);
-
     nlohmann::ordered_json action;
     action["type"] = "twapCancel";
-    action["a"] = asset;
+    action["a"] = info_.nameToAsset(coin);
     action["t"] = twap_id;
 
-    int64_t timestamp = getTimestampMs();
-    bool is_mainnet = (base_url_ == MAINNET_API_URL);
-
-    std::optional<std::string> vault_opt = vault_address_.empty() ?
-        std::nullopt : std::optional<std::string>(vault_address_);
-    auto signature = signL1Action(*wallet_, action, vault_opt, timestamp,
-                                 expires_after_, is_mainnet);
-
-    return postAction(action, signature, timestamp);
+    return postL1Action(action);
 }
 
 nlohmann::json Exchange::usdTransfer(double amount, const std::string& destination) {
@@ -456,15 +412,7 @@ nlohmann::json Exchange::updateLeverage(int leverage,
     action["isCross"] = is_cross;
     action["leverage"] = leverage;
 
-    int64_t timestamp = getTimestampMs();
-    bool is_mainnet = (base_url_ == MAINNET_API_URL);
-
-    std::optional<std::string> vault_opt = vault_address_.empty() ?
-        std::nullopt : std::optional<std::string>(vault_address_);
-    auto signature = signL1Action(*wallet_, action, vault_opt, timestamp,
-                                 expires_after_, is_mainnet);
-
-    return postAction(action, signature, timestamp);
+    return postL1Action(action);
 }
 
 nlohmann::json Exchange::updateIsolatedMargin(double amount, const std::string& coin) {
@@ -477,34 +425,17 @@ nlohmann::json Exchange::updateIsolatedMargin(double amount, const std::string& 
     action["isBuy"] = true;
     action["ntli"] = ntli;
 
-    int64_t timestamp = getTimestampMs();
-    bool is_mainnet = (base_url_ == MAINNET_API_URL);
-
-    std::optional<std::string> vault_opt = vault_address_.empty() ?
-        std::nullopt : std::optional<std::string>(vault_address_);
-    auto signature = signL1Action(*wallet_, action, vault_opt, timestamp,
-                                 expires_after_, is_mainnet);
-
-    return postAction(action, signature, timestamp);
+    return postL1Action(action);
 }
 
 nlohmann::json Exchange::scheduleCancel(std::optional<int64_t> time) {
-    int64_t timestamp = getTimestampMs();
-
     nlohmann::ordered_json action;
     action["type"] = "scheduleCancel";
     if (time.has_value()) {
         action["time"] = time.value();
     }
 
-    bool is_mainnet = (base_url_ == MAINNET_API_URL);
-
-    std::optional<std::string> vault_opt = vault_address_.empty() ?
-        std::nullopt : std::optional<std::string>(vault_address_);
-    auto signature = signL1Action(*wallet_, action, vault_opt, timestamp,
-                                 expires_after_, is_mainnet);
-
-    return postAction(action, signature, timestamp);
+    return postL1Action(action);
 }
 
 nlohmann::json Exchange::queryOrderByCloid(const std::string& user, const Cloid& cloid) {

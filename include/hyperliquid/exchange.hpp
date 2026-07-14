@@ -136,12 +136,9 @@ public:
 
     /**
      * Cancel a running TWAP order.
+     * Failure surfaces like twapOrder(); see above.
      *
-     * As with twapOrder(), a failure comes back as HTTP 200 with
-     * response["response"]["data"]["status"]["error"], e.g.
-     * "TWAP was never placed, already canceled, or filled."
-     *
-     * @param coin Coin name (e.g. "ETH")
+     * @param coin Coin name (e.g. "ETH"). Must match the coin the TWAP was placed on.
      * @param twap_id The twap id returned by twapOrder()
      */
     nlohmann::json twapCancel(const std::string& coin, int64_t twap_id);
@@ -198,6 +195,16 @@ public:
     Info info_;
 
 private:
+    /**
+     * Sign an L1 action with the current nonce, vault address and expiry, then
+     * post it. Every L1 action (orders, cancels, modifies, leverage, twap, ...)
+     * goes through here so the signing inputs stay in one place.
+     *
+     * Not used by the user-signed actions (usdTransfer, spotTransfer), which
+     * sign an EIP-712 payload instead and carry their own nonce.
+     */
+    nlohmann::json postL1Action(const nlohmann::ordered_json& action);
+
     nlohmann::json postAction(const nlohmann::json& action,
                              const Signature& signature,
                              int64_t nonce);

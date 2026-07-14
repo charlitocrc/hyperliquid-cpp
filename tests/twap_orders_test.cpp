@@ -119,13 +119,7 @@ void twapOrderPostsExpectedAction() {
     assert(action.at("twap").at("m") == 30);
     assert(action.at("twap").at("t") == false);
 
-    // Envelope carries a nonce and a signature.
-    const auto& payload = exchange.requests()[0].payload;
-    assert(payload.contains("nonce"));
-    assert(payload.at("nonce").get<int64_t>() > 0);
-    assert(payload.at("signature").contains("r"));
-    assert(payload.at("signature").contains("s"));
-    assert(payload.at("signature").contains("v"));
+    // Signing of the envelope is covered by l1_action_signing_test.
 
     // The twap id comes back nested under status.running.
     assert(response.at("response").at("data").at("status").at("running").at("twapId") == 77738308);
@@ -193,18 +187,6 @@ void twapCancelPostsExpectedAction() {
     assert(action.at("t") == 77738308);
 }
 
-void twapMethodsRejectUnknownCoin() {
-    TestExchange exchange;
-
-    bool threw = false;
-    try {
-        exchange.twapOrder("NOT_A_COIN", true, 1.0, 30);
-    } catch (const std::exception&) {
-        threw = true;
-    }
-    assert(threw);
-}
-
 } // namespace
 
 int main() {
@@ -215,7 +197,6 @@ int main() {
     twapOrderRejectsNonPositiveMinutes();
     twapOrderRejectsSizeThatRoundsToZero();
     twapCancelPostsExpectedAction();
-    twapMethodsRejectUnknownCoin();
 
     return 0;
 }

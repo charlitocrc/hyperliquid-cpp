@@ -55,12 +55,8 @@ int main() {
             return 1;
         }
 
-        if (!status.contains("running")) {
-            std::cerr << "✗ Unexpected TWAP response shape\n";
-            return 1;
-        }
-
-        int64_t twap_id = status["running"]["twapId"];
+        // .at() so an unexpected shape throws into the catch below.
+        int64_t twap_id = status.at("running").at("twapId");
         std::cout << "✓ TWAP running with id: " << twap_id << "\n\n";
 
         // Let a couple of slices execute. Suborders fire every 30 seconds.
