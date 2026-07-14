@@ -428,6 +428,33 @@ nlohmann::json Exchange::updateIsolatedMargin(double amount, const std::string& 
     return postL1Action(action);
 }
 
+nlohmann::json Exchange::topUpIsolatedOnlyMargin(const std::string& coin, double leverage) {
+    if (leverage <= 0.0) {
+        throw std::invalid_argument("topUpIsolatedOnlyMargin leverage must be positive");
+    }
+
+    nlohmann::ordered_json action;
+    action["type"] = "topUpIsolatedOnlyMargin";
+    action["asset"] = info_.nameToAsset(coin);
+    // The API wants leverage as a float string ("5" not 5.0); floatToWire
+    // normalizes trailing zeros the same way order prices are encoded.
+    action["leverage"] = floatToWire(leverage);
+
+    return postL1Action(action);
+}
+
+nlohmann::json Exchange::reserveRequestWeight(int64_t weight) {
+    if (weight <= 0) {
+        throw std::invalid_argument("reserveRequestWeight weight must be positive");
+    }
+
+    nlohmann::ordered_json action;
+    action["type"] = "reserveRequestWeight";
+    action["weight"] = weight;
+
+    return postL1Action(action);
+}
+
 nlohmann::json Exchange::scheduleCancel(std::optional<int64_t> time) {
     nlohmann::ordered_json action;
     action["type"] = "scheduleCancel";

@@ -187,6 +187,35 @@ public:
     nlohmann::json updateIsolatedMargin(double amount, const std::string& coin);
 
     /**
+     * Top up the margin of an isolated position so that its effective leverage
+     * drops to the target value.
+     *
+     * Distinct from updateIsolatedMargin(): that one moves a fixed USDC amount
+     * in or out, while this one lets the exchange compute how much margin to
+     * add to reach `leverage`. Top-up only — it never removes margin.
+     *
+     * Wire action: {"type": "topUpIsolatedOnlyMargin", "asset": N, "leverage": "<float string>"}
+     *
+     * @param coin Coin name of the isolated position (e.g. "ETH")
+     * @param leverage Target leverage, e.g. 5.0 for 5x. Must be positive.
+     */
+    nlohmann::json topUpIsolatedOnlyMargin(const std::string& coin, double leverage);
+
+    /**
+     * Buy extra request weight to raise this address's rate limit instead of
+     * being throttled. Pairs with the info_.userRateLimit() query, which reports
+     * cumulative volume, requests used, and the current cap.
+     *
+     * Costs are charged by the exchange per unit of weight; this SDK does not
+     * model the price. A successful reservation raises nRequestsCap.
+     *
+     * Wire action: {"type": "reserveRequestWeight", "weight": N}
+     *
+     * @param weight Number of request-weight units to reserve. Must be positive.
+     */
+    nlohmann::json reserveRequestWeight(int64_t weight);
+
+    /**
      * Set expiration time for actions (optional)
      */
     void setExpiresAfter(std::optional<int64_t> expires_after);

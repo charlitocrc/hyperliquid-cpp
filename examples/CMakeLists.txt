@@ -13,6 +13,7 @@ set(EXAMPLES
     account_queries
     info_perp_deployment_queries
     twap_order
+    rate_limits_margin
 )
 
 foreach(EXAMPLE ${EXAMPLES})
