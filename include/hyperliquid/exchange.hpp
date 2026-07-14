@@ -156,6 +156,19 @@ public:
                                const std::string& token);
 
     /**
+     * Transfer USDC between the spot and perp balances of the same account.
+     *
+     * User-signed action (EIP-712), so it carries its own nonce and no
+     * vaultAddress field. When the Exchange was constructed with a vault or
+     * subaccount address, the transfer applies to that subaccount: the wire
+     * amount becomes "<amount> subaccount:<address>", matching the Python SDK.
+     *
+     * @param amount USDC amount to move
+     * @param to_perp true: spot -> perp, false: perp -> spot
+     */
+    nlohmann::json usdClassTransfer(double amount, bool to_perp);
+
+    /**
      * Update leverage for a coin
      */
     nlohmann::json updateLeverage(int leverage,

@@ -15,8 +15,9 @@ docs (Info / Exchange / WebSocket endpoints) and cross-checked against the reque
   `userFees`, `userRole`, `userRateLimit`, `userTwapSliceFills`, `userVaultEquities`, `vaultDetails`,
   `subAccounts`, `referral`, `portfolio`, `maxBuilderFee`, `approvedBuilders`, `userDexAbstraction`,
   `userAbstraction`
-- Exchange (12 actions): `order`, `cancel`, `cancelByCloid`, `modify`, `batchModify`, `scheduleCancel`,
-  `updateLeverage`, `updateIsolatedMargin`, `usdSend`, `spotSend`, `twapOrder`, `twapCancel`
+- Exchange (15 actions): `order`, `cancel`, `cancelByCloid`, `modify`, `batchModify`, `scheduleCancel`,
+  `updateLeverage`, `updateIsolatedMargin`, `topUpIsolatedOnlyMargin`, `usdSend`, `spotSend`,
+  `usdClassTransfer`, `twapOrder`, `twapCancel`, `reserveRequestWeight`
 - Market orders (`marketOpen` / `marketClose`), EIP-712 signing, ECDSA secp256k1 wallet,
   automatic tick/lot rounding, `setExpiresAfter`
 - 4 working examples
@@ -118,16 +119,24 @@ rejecting orders the API would accept. We validate only size > 0 and minutes > 0
 Callers must check `response.data.status` for an `error` key: a rejected TWAP still returns
 HTTP 200 with `"status": "ok"` at the top level.
 
-### Rate Limits & Margin
+### Rate Limits & Margin — DONE
 
-- [ ] `reserveRequestWeight()` - action `reserveRequestWeight`; buy extra request weight instead
-      of being throttled. Pairs with the existing `userRateLimit()` query.
-- [ ] `topUpIsolatedOnlyMargin()` - action `topUpIsolatedOnlyMargin`; distinct from the
-      already-implemented `updateIsolatedMargin`
+Neither exists in the Python SDK; implemented from the docs directly, like TWAP.
+
+- [x] `reserveRequestWeight()` - action `reserveRequestWeight`; wire `{type, weight}`. Buys extra
+      request weight instead of being throttled. Pairs with the existing `userRateLimit()` query.
+- [x] `topUpIsolatedOnlyMargin()` - action `topUpIsolatedOnlyMargin`; wire
+      `{type, asset, leverage}` with leverage as a float string via `floatToWire`. Distinct from
+      `updateIsolatedMargin` (fixed USDC delta): this targets a leverage and only adds margin.
+- [x] Tests in `tests/rate_limits_margin_test.cpp`, example in `examples/rate_limits_margin.cpp`
 
 ### Asset Movements
 
-- [ ] `usdClassTransfer()` - action `usdClassTransfer`; spot ↔ perp
+- [x] `usdClassTransfer()` - action `usdClassTransfer`; spot ↔ perp. User-signed
+      (`HyperliquidTransaction:UsdClassTransfer`); no vaultAddress field — a configured
+      vault/subaccount rides in the signed amount as `"<amount> subaccount:<addr>"`.
+      Added EIP-712 `bool` encoding for `toPerp`; signature pinned against the Python SDK
+      in `tests/usd_class_transfer_test.cpp`. Example in `examples/usd_class_transfer.cpp`.
 - [ ] `sendAsset()` - action `sendAsset`; between dexes
 - [ ] `agentSendAsset()` - action `agentSendAsset`
 - [ ] `sendToEvmWithData()` - action `sendToEvmWithData`; HyperCore → HyperEVM with calldata
@@ -343,7 +352,7 @@ Our `Meta` type does not model any of these.
 | **Account** |
 | Leverage / Isolated Margin | ✅ | ✅ | Complete |
 | Transfers (USD/Spot) | ✅ | ✅ | Complete |
-| USD Class Transfer | ✅ | ❌ | TODO |
+| USD Class Transfer | ✅ | ✅ | Complete |
 | Vault Transfers | ✅ | ❌ | TODO |
 | Sub-Accounts | ✅ | ❌ | TODO |
 | Bridge Withdrawal | ✅ | ❌ | TODO |
@@ -384,8 +393,8 @@ Everything real-time is blocked on this. Start with the manager + `l2Book`, `tra
 `userFills`, `orderUpdates`; add the remaining 19 subscriptions after. Note `fastAssetCtxs` needs
 raw-DEFLATE decompression, and `webData2` no longer exists.
 
-### Phase 2: Order Types & Rate Limits
-~~TWAP orders~~ (done). Remaining: `reserveRequestWeight`, `topUpIsolatedOnlyMargin`.
+### Phase 2: Order Types & Rate Limits — DONE
+~~TWAP orders~~, ~~`reserveRequestWeight`~~, ~~`topUpIsolatedOnlyMargin`~~ all done.
 
 ### Phase 3: Account Management
 Sub-accounts, vault transfers, `usdClassTransfer`, bridge withdrawal, agents, referrals.

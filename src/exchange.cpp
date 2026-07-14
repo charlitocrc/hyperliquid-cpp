@@ -392,6 +392,36 @@ nlohmann::json Exchange::spotTransfer(double amount,
     return postAction(action, signature, action["time"]);
 }
 
+nlohmann::json Exchange::usdClassTransfer(double amount, bool to_perp) {
+    std::string str_amount = floatToWire(amount);
+    // This action has no vaultAddress field (postAction omits it); acting on
+    // behalf of a subaccount is encoded in the signed amount string instead.
+    if (!vault_address_.empty()) {
+        str_amount += " subaccount:" + vault_address_;
+    }
+
+    nlohmann::json action = {
+        {"type", "usdClassTransfer"},
+        {"amount", str_amount},
+        {"toPerp", to_perp},
+        {"nonce", getTimestampMs()}
+    };
+
+    std::vector<EIP712Type> payload_types = {
+        {"hyperliquidChain", "string"},
+        {"amount", "string"},
+        {"toPerp", "bool"},
+        {"nonce", "uint64"}
+    };
+
+    bool is_mainnet = (base_url_ == MAINNET_API_URL);
+    auto signature = signUserSignedAction(*wallet_, action, payload_types,
+                                         "HyperliquidTransaction:UsdClassTransfer",
+                                         is_mainnet);
+
+    return postAction(action, signature, action["nonce"]);
+}
+
 nlohmann::json Exchange::updateLeverage(int leverage,
                                         const std::string& coin,
                                         bool is_cross) {

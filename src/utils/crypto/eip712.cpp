@@ -68,6 +68,10 @@ std::vector<uint8_t> encodeField(const std::string& type, const nlohmann::json& 
             encoded[24 + (7 - i)] = (num >> (i * 8)) & 0xFF;
         }
         return encoded;
+    } else if (type == "bool") {
+        // Encoded like uint256 0 or 1
+        encoded[31] = value.get<bool>() ? 1 : 0;
+        return encoded;
     } else if (type == "address") {
         // Address is 20 bytes, left-padded to 32 bytes
         std::string addr = value.get<std::string>();

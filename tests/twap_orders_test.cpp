@@ -1,88 +1,20 @@
-#include "hyperliquid/exchange.hpp"
+#include "test_exchange.hpp"
+
 #include "hyperliquid/utils/signing.hpp"
 
 #include <cassert>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
-using hyperliquid::AssetInfo;
-using hyperliquid::Exchange;
-using hyperliquid::Meta;
-using hyperliquid::SpotAssetInfo;
-using hyperliquid::SpotMeta;
-using hyperliquid::SpotTokenInfo;
 using hyperliquid::TwapWire;
-using hyperliquid::Wallet;
+using hyperliquid_test::TestExchange;
 
 namespace {
 
-// Test-only key. Never used for anything but signing offline fixtures.
-constexpr const char* TEST_PRIVATE_KEY =
-    "0x0123456789012345678901234567890123456789012345678901234567890123";
-
-struct CapturedRequest {
-    std::string path;
-    nlohmann::json payload;
-};
-
-class TestExchange : public Exchange {
-public:
-    TestExchange()
-        : Exchange(Wallet::fromPrivateKey(TEST_PRIVATE_KEY),
-                   "http://localhost",
-                   &perpMeta(),
-                   "",
-                   "",
-                   &spotMetaFixture(),
-                   &perpDexsFixture(),
-                   1000) {}
-
-    const std::vector<CapturedRequest>& requests() const {
-        return requests_;
-    }
-
-    // The action as it was actually sent, minus the envelope.
-    const nlohmann::json& lastAction() const {
-        return requests_.back().payload.at("action");
-    }
-
-protected:
-    nlohmann::json post(const std::string& url_path,
-                        const nlohmann::json& payload = nlohmann::json::object()) override {
-        requests_.push_back({url_path, payload});
-        return next_response_;
-    }
-
-private:
-    // BTC has szDecimals 5, so sizes round to 5 decimal places.
-    static const Meta& perpMeta() {
-        static const Meta meta{{AssetInfo{"BTC", 5}}};
-        return meta;
-    }
-
-    static const SpotMeta& spotMetaFixture() {
-        static const SpotMeta spot_meta{
-            {SpotAssetInfo{"PURR/USDC", {1, 0}, 0, true}},
-            {
-                SpotTokenInfo{"USDC", 8, 8, 0, "0x0", true},
-                SpotTokenInfo{"PURR", 0, 5, 1, "0x1", true},
-            },
-        };
-        return spot_meta;
-    }
-
-    static const std::vector<std::string>& perpDexsFixture() {
-        static const std::vector<std::string> dexs{""};
-        return dexs;
-    }
-
-    std::vector<CapturedRequest> requests_;
-    nlohmann::json next_response_ = {
-        {"status", "ok"},
-        {"response", {{"type", "twapOrder"},
-                      {"data", {{"status", {{"running", {{"twapId", 77738308}}}}}}}}},
-    };
+const nlohmann::json kTwapRunningResponse = {
+    {"status", "ok"},
+    {"response", {{"type", "twapOrder"},
+                  {"data", {{"status", {{"running", {{"twapId", 77738308}}}}}}}}},
 };
 
 // The action hash is keccak(msgpack(action)), so the key order of the twap
@@ -104,6 +36,7 @@ void twapWireSerializesKeysInSpecOrder() {
 
 void twapOrderPostsExpectedAction() {
     TestExchange exchange;
+    exchange.next_response = kTwapRunningResponse;
 
     const auto response = exchange.twapOrder("BTC", true, 1.5, 30);
 

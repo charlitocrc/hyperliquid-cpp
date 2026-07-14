@@ -14,6 +14,7 @@ set(EXAMPLES
     info_perp_deployment_queries
     twap_order
     rate_limits_margin
+    usd_class_transfer
 )
 
 foreach(EXAMPLE ${EXAMPLES})
