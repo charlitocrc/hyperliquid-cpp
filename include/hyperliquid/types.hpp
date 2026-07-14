@@ -136,6 +136,22 @@ struct ModifyRequest {
 };
 
 /**
+ * TWAP order wire format (for API transmission)
+ * A TWAP splits a large order into suborders executed in 30s intervals,
+ * each with a maximum slippage of 3%.
+ */
+struct TwapWire {
+    int asset;          // "a"
+    bool is_buy;        // "b"
+    std::string size;   // "s" - 8 decimal string
+    bool reduce_only;   // "r"
+    int minutes;        // "m" - duration over which the order is spread
+    bool randomize;     // "t" - randomize suborder timing
+
+    nlohmann::ordered_json toJson() const;
+};
+
+/**
  * Asset information
  */
 struct AssetInfo {

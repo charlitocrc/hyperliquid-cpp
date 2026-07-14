@@ -104,6 +104,49 @@ public:
     nlohmann::json bulkModifyOrders(const std::vector<ModifyRequest>& modifies);
 
     /**
+     * Place a TWAP order.
+     *
+     * The order is split into suborders executed in 30 second intervals over
+     * `minutes`. Each suborder has a maximum slippage of 3%.
+     *
+     * The size is rounded to the asset's szDecimals, same as order().
+     *
+     * On success the response carries the twap id, which is what twapCancel()
+     * takes:
+     *   response["response"]["data"]["status"]["running"]["twapId"]
+     *
+     * Note that a rejection is still HTTP 200 with status "ok"; the failure
+     * surfaces as response["response"]["data"]["status"]["error"], e.g.
+     * "Invalid TWAP duration: 1 min(s)". Check it before assuming success.
+     *
+     * @param coin Coin name (e.g. "ETH")
+     * @param is_buy True to buy, false to sell
+     * @param sz Total size to execute across the whole TWAP
+     * @param minutes Duration to spread the order over. Valid range is enforced
+     *                by the API, not here.
+     * @param reduce_only Only reduce an existing position
+     * @param randomize Randomize suborder timing
+     */
+    nlohmann::json twapOrder(const std::string& coin,
+                            bool is_buy,
+                            double sz,
+                            int minutes,
+                            bool reduce_only = false,
+                            bool randomize = false);
+
+    /**
+     * Cancel a running TWAP order.
+     *
+     * As with twapOrder(), a failure comes back as HTTP 200 with
+     * response["response"]["data"]["status"]["error"], e.g.
+     * "TWAP was never placed, already canceled, or filled."
+     *
+     * @param coin Coin name (e.g. "ETH")
+     * @param twap_id The twap id returned by twapOrder()
+     */
+    nlohmann::json twapCancel(const std::string& coin, int64_t twap_id);
+
+    /**
      * Transfer USD to another address
      */
     nlohmann::json usdTransfer(double amount, const std::string& destination);

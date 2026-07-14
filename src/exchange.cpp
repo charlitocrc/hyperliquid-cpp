@@ -2,6 +2,7 @@
 #include "hyperliquid/utils/constants.hpp"
 #include "hyperliquid/utils/conversions.hpp"
 #include <cmath>
+#include <stdexcept>
 
 namespace hyperliquid {
 
@@ -309,6 +310,70 @@ nlohmann::json Exchange::bulkModifyOrders(const std::vector<ModifyRequest>& modi
     nlohmann::ordered_json action;
     action["type"] = "batchModify";
     action["modifies"] = modifies_array;
+
+    int64_t timestamp = getTimestampMs();
+    bool is_mainnet = (base_url_ == MAINNET_API_URL);
+
+    std::optional<std::string> vault_opt = vault_address_.empty() ?
+        std::nullopt : std::optional<std::string>(vault_address_);
+    auto signature = signL1Action(*wallet_, action, vault_opt, timestamp,
+                                 expires_after_, is_mainnet);
+
+    return postAction(action, signature, timestamp);
+}
+
+nlohmann::json Exchange::twapOrder(const std::string& coin,
+                                   bool is_buy,
+                                   double sz,
+                                   int minutes,
+                                   bool reduce_only,
+                                   bool randomize) {
+    int asset = info_.nameToAsset(coin);
+    int sz_decimals = info_.asset_to_sz_decimals_[asset];
+
+    double rounded_sz = roundSize(sz, sz_decimals);
+    if (rounded_sz <= 0.0) {
+        throw std::invalid_argument(
+            "TWAP size rounds to zero for " + coin +
+            " (szDecimals=" + std::to_string(sz_decimals) + ")");
+    }
+
+    // Duration bounds are not published, so let the API own that policy rather
+    // than guessing a range and rejecting orders it would have accepted.
+    if (minutes <= 0) {
+        throw std::invalid_argument("TWAP minutes must be positive");
+    }
+
+    TwapWire twap;
+    twap.asset = asset;
+    twap.is_buy = is_buy;
+    twap.size = floatToWire(rounded_sz);
+    twap.reduce_only = reduce_only;
+    twap.minutes = minutes;
+    twap.randomize = randomize;
+
+    nlohmann::ordered_json action;
+    action["type"] = "twapOrder";
+    action["twap"] = twap.toJson();
+
+    int64_t timestamp = getTimestampMs();
+    bool is_mainnet = (base_url_ == MAINNET_API_URL);
+
+    std::optional<std::string> vault_opt = vault_address_.empty() ?
+        std::nullopt : std::optional<std::string>(vault_address_);
+    auto signature = signL1Action(*wallet_, action, vault_opt, timestamp,
+                                 expires_after_, is_mainnet);
+
+    return postAction(action, signature, timestamp);
+}
+
+nlohmann::json Exchange::twapCancel(const std::string& coin, int64_t twap_id) {
+    int asset = info_.nameToAsset(coin);
+
+    nlohmann::ordered_json action;
+    action["type"] = "twapCancel";
+    action["a"] = asset;
+    action["t"] = twap_id;
 
     int64_t timestamp = getTimestampMs();
     bool is_mainnet = (base_url_ == MAINNET_API_URL);

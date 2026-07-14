@@ -12,6 +12,7 @@ set(EXAMPLES
     candles_snapshot
     account_queries
     info_perp_deployment_queries
+    twap_order
 )
 
 foreach(EXAMPLE ${EXAMPLES})

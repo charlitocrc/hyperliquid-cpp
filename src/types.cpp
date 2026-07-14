@@ -73,4 +73,19 @@ nlohmann::ordered_json OrderWire::toJson() const {
     return result;
 }
 
+// TwapWire implementation
+
+nlohmann::ordered_json TwapWire::toJson() const {
+    // Key order must match the API spec exactly: a, b, s, r, m, t
+    // The action hash is keccak(msgpack(action)), so insertion order is load-bearing.
+    nlohmann::ordered_json result;
+    result["a"] = asset;
+    result["b"] = is_buy;
+    result["s"] = size;
+    result["r"] = reduce_only;
+    result["m"] = minutes;
+    result["t"] = randomize;
+    return result;
+}
+
 } // namespace hyperliquid
