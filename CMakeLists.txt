@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Options
 option(BUILD_EXAMPLES "Build example programs" ON)
 option(BUILD_TESTS "Build tests" OFF)
+option(BUILD_WEBSOCKET "Build WebSocket support (fetches IXWebSocket)" ON)
 
 # Find dependencies
 find_package(CURL REQUIRED)
@@ -41,6 +42,33 @@ if(NOT msgpack-cxx_FOUND)
     target_include_directories(msgpack-cxx INTERFACE ${msgpack_SOURCE_DIR}/include)
 endif()
 
+# IXWebSocket - websocket transport
+#
+# Not libcurl: curl only speaks ws/wss when built with --enable-websockets, and
+# the libcurl shipped in the macOS SDK is not. It links fine and then fails at
+# runtime, so the SDK would break on a stock toolchain.
+if(BUILD_WEBSOCKET)
+    # Raw-DEFLATE inflate for fastAssetCtxs payloads. Already present on every
+    # supported platform (libcurl links it), so this costs no new install step.
+    find_package(ZLIB REQUIRED)
+
+    include(FetchContent)
+    # IXWebSocket declares cmake_minimum_required(VERSION 3.4.1...3.17.2) and
+    # CMake 4.x removed compatibility with < 3.5, so the fetch errors out without
+    # this. Scoped to this directory so it does not relax the project's own floor.
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+    set(USE_TLS ON CACHE BOOL "" FORCE)
+    set(USE_OPEN_SSL ON CACHE BOOL "" FORCE)  # project already requires OpenSSL 3.0
+    set(USE_ZLIB OFF CACHE BOOL "" FORCE)     # permessage-deflate is not needed
+    set(USE_WS OFF CACHE BOOL "" FORCE)       # skip the bundled ws CLI tool
+    set(USE_TEST OFF CACHE BOOL "" FORCE)
+    set(IXWEBSOCKET_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(ixwebsocket
+        GIT_REPOSITORY https://github.com/machinezone/IXWebSocket.git
+        GIT_TAG v12.0.1)
+    FetchContent_MakeAvailable(ixwebsocket)
+endif()
+
 # Library source files
 set(HYPERLIQUID_SOURCES
     src/api.cpp
@@ -53,6 +81,10 @@ set(HYPERLIQUID_SOURCES
     src/utils/crypto/keccak.cpp
     src/utils/crypto/ecdsa.cpp
 )
+
+if(BUILD_WEBSOCKET)
+    list(APPEND HYPERLIQUID_SOURCES src/websocket_manager.cpp src/ws_types.cpp)
+endif()
 
 # Create library
 add_library(hyperliquid ${HYPERLIQUID_SOURCES})
@@ -73,6 +105,13 @@ target_link_libraries(hyperliquid
         CURL::libcurl
         OpenSSL::Crypto
 )
+
+# PRIVATE: ix::WebSocket is forward declared in websocket_manager.hpp, so
+# IXWebSocket's headers never reach consumers of this library.
+if(BUILD_WEBSOCKET)
+    target_link_libraries(hyperliquid PRIVATE ixwebsocket ZLIB::ZLIB)
+    target_compile_definitions(hyperliquid PUBLIC HYPERLIQUID_WEBSOCKET)
+endif()
 
 # Compiler warnings
 if(MSVC)

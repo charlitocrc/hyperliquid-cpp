@@ -5,20 +5,33 @@
 #include <unordered_map>
 #include <vector>
 #include <optional>
+#include <functional>
+#include <memory>
 
 namespace hyperliquid {
+
+class WebSocketManager;
 
 /**
  * Info class for querying market data and user information
  */
 class Info : public API {
 public:
+    /**
+     * @param skip_ws when false, a WebSocketManager is created and connected so
+     *                subscribe() can be used. Defaults to true: HTTP only, no
+     *                socket, no background threads.
+     */
     explicit Info(const std::string& base_url = "",
                  bool skip_ws = true,
                  const Meta* meta = nullptr,
                  const SpotMeta* spot_meta = nullptr,
                  const std::vector<std::string>* perp_dexs = nullptr,
                  int timeout_ms = 30000);
+
+    // Out of line so the unique_ptr below does not need the full definition of
+    // WebSocketManager here.
+    ~Info() override;
 
     /**
      * Get asset number from coin/pair name
@@ -517,6 +530,29 @@ public:
      */
     void registerSpotMeta(const SpotMeta& spot_meta);
 
+    /**
+     * Subscribe to a websocket feed, e.g. {"type":"l2Book","coin":"ETH"}.
+     *
+     * Callbacks run on the websocket thread; see websocket_manager.hpp for the
+     * full threading contract.
+     *
+     * @return an id for unsubscribe().
+     * @throws Error if the Info was constructed with skip_ws = true.
+     */
+    int subscribe(const nlohmann::json& subscription,
+                  std::function<void(const nlohmann::json&)> callback);
+
+    /**
+     * Remove a subscription registered by subscribe().
+     *
+     * @return true if subscription_id was found and removed.
+     * @throws Error if the Info was constructed with skip_ws = true.
+     */
+    bool unsubscribe(const nlohmann::json& subscription, int subscription_id);
+
+    /** Close the websocket. No-op when skip_ws was true. */
+    void disconnectWebsocket();
+
     // Metadata caches (public for Exchange class access)
     std::unordered_map<std::string, int> coin_to_asset_;
     std::unordered_map<std::string, std::string> name_to_coin_;
@@ -528,6 +564,16 @@ private:
                            const std::vector<std::string>* perp_dexs);
 
     void setPerpMeta(const Meta& meta, int offset);
+
+#ifdef HYPERLIQUID_WEBSOCKET
+    /** Returns the manager, or throws if this Info was built with skip_ws. */
+    WebSocketManager& requireWebSocket() const;
+
+    // Null unless the constructor was given skip_ws = false. Absent entirely in
+    // a -DBUILD_WEBSOCKET=OFF build, where unique_ptr could not destroy an
+    // incomplete WebSocketManager anyway.
+    std::unique_ptr<WebSocketManager> ws_manager_;
+#endif
 };
 
 } // namespace hyperliquid

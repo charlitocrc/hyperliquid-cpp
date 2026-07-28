@@ -20,6 +20,10 @@ set(EXAMPLES
     approve_agent
 )
 
+if(BUILD_WEBSOCKET)
+    list(APPEND EXAMPLES websocket_subscriptions)
+endif()
+
 foreach(EXAMPLE ${EXAMPLES})
     add_executable(${EXAMPLE} ${EXAMPLE}.cpp)
     target_link_libraries(${EXAMPLE} PRIVATE hyperliquid)

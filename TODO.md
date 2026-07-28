@@ -15,10 +15,10 @@ docs (Info / Exchange / WebSocket endpoints) and cross-checked against the reque
   `userFees`, `userRole`, `userRateLimit`, `userTwapSliceFills`, `userVaultEquities`, `vaultDetails`,
   `subAccounts`, `referral`, `portfolio`, `maxBuilderFee`, `approvedBuilders`, `userDexAbstraction`,
   `userAbstraction`
-- Exchange (17 actions): `order`, `cancel`, `cancelByCloid`, `modify`, `batchModify`, `scheduleCancel`,
+- Exchange (18 actions): `order`, `cancel`, `cancelByCloid`, `modify`, `batchModify`, `scheduleCancel`,
   `updateLeverage`, `updateIsolatedMargin`, `topUpIsolatedOnlyMargin`, `usdSend`, `spotSend`,
   `usdClassTransfer`, `sendAsset`, `twapOrder`, `twapCancel`, `reserveRequestWeight`,
-  `approveBuilderFee`
+  `approveBuilderFee`, `approveAgent`
 - Market orders (`marketOpen` / `marketClose`), EIP-712 signing, ECDSA secp256k1 wallet,
   automatic tick/lot rounding, `setExpiresAfter`
 - 4 working examples
@@ -30,72 +30,179 @@ sub-accounts, vaults, agents/referrals, multi-sig, token/perp deployment, predic
 
 ## Critical Priority - WebSocket Support
 
-Nothing exists yet — no `ws://` code anywhere in `src/` or `include/`. This is the single
-largest gap and blocks every real-time use case.
+### Infrastructure — DONE
 
-### Infrastructure
+Transport is IXWebSocket, fetched via `FetchContent` behind `option(BUILD_WEBSOCKET)` (default
+ON). Not libcurl: curl only speaks `ws`/`wss` when built with `--enable-websockets`, and the
+libcurl in the macOS SDK is not — it links and then fails at runtime.
 
-- [ ] `WebSocketManager` class
-  - [ ] Connection management (connect, disconnect, reconnect)
-  - [ ] Ping/pong keepalive
-  - [ ] Subscription ID tracking and message routing to callbacks
-  - [ ] Thread-safe operation, queuing of subscriptions made before connect
-- [ ] `subscribe()` / `unsubscribe()` / `disconnectWebsocket()`
-- [ ] `subscriptionToIdentifier()`, `wsMsgToIdentifier()`, `run()`, `sendPing()`, `stop()`,
-      `onMessage()`, `onOpen()`
+- [x] `WebSocketManager` class in `include/hyperliquid/websocket_manager.hpp` /
+      `src/websocket_manager.cpp`
+  - [x] Connection management. Reconnect is automatic; every `Open` re-sends **all** active
+        subscriptions, because the server keeps no record of them across connections. There is
+        deliberately no separate "queued before connect" list like the Python SDK's — that
+        design silently loses every subscription after a reconnect.
+  - [x] Ping keepalive: `{"method":"ping"}` every 50s from a thread parked on a
+        `condition_variable`, which doubles as the stop signal. Not IXWebSocket's
+        `setPingInterval`, which sends RFC 6455 frames rather than the documented JSON ping.
+  - [x] Subscription id tracking and identifier-based routing to callbacks
+  - [x] Thread-safe. Callbacks fire on the network thread with the lock released, so a
+        callback may call `subscribe()` without deadlocking.
+- [x] `subscribe()` / `unsubscribe()` / `disconnectWebsocket()`, on `WebSocketManager` and
+      forwarded from `Info` (which is what the previously-dead `skip_ws` flag now controls)
+- [x] `subscriptionToIdentifier()` / `messageToIdentifier()`, plus `start()`, `stop()`,
+      `onOpen()`, `onMessage()`, `pingLoop()`
+- [x] `setErrorCallback()` / `setUnhandledCallback()` — no Python equivalent. Without them a
+      routing mismatch is indistinguishable from "no data".
 - [ ] **WebSocket POST requests** - the WS API can carry any info request or signed action
       (`{"method": "post", "id": n, "request": {"type": "info"|"action", "payload": {...}}}`).
       Explorer requests are not supported over WS.
 
-### Subscriptions (24 documented types)
+### Subscriptions (24 documented types) — DONE
 
-The docs now list 24 subscriptions. `webData2` is gone — it is `webData3` now.
+All 24 are routable. `webData2` is gone — it is `webData3` now.
 
-- [ ] `allMids` (takes optional `dex`; spot mids only ride along with the first perp dex)
-- [ ] `notification`
-- [ ] `webData3` — replaces the old `webData2`
-- [ ] `twapStates`
-- [ ] `clearinghouseState` (per-dex)
-- [ ] `openOrders` (per-dex)
-- [ ] `candle`
-- [ ] `l2Book` (optional `nSigFigs`, `mantissa`, `fast` — 5 levels fast / 20 slow)
-- [ ] `trades`
-- [ ] `orderUpdates`
-- [ ] `userEvents` (note: inbound channel name is `"user"`, not `"userEvents"`)
-- [ ] `userFills` (optional `aggregateByTime`)
-- [ ] `userFundings`
-- [ ] `userNonFundingLedgerUpdates`
-- [ ] `activeAssetCtx` (returns perp *or* spot ctx shape)
-- [ ] `activeAssetData` (perps only)
-- [ ] `userTwapSliceFills`
-- [ ] `userTwapHistory`
-- [ ] `bbo`
-- [ ] `spotState` (optional `isPortfolioMargin`)
-- [ ] `allDexsClearinghouseState`
-- [ ] `allDexsAssetCtxs`
-- [ ] `outcomeMetaUpdates` (prediction markets)
-- [ ] `fastAssetCtxs` — payload is base64 + **raw DEFLATE** (RFC 1951, no zlib/gzip wrapper).
-      Decode: base64 → inflate raw → UTF-8 → JSON. First message is a snapshot; later messages
-      carry only changed coins. Will need a raw-inflate dependency (zlib with `windowBits = -15`).
+Routing uses one 24-row table (`kChannels` in `src/websocket_manager.cpp`) driving both the
+outbound and inbound identifier, rather than the Python SDK's two parallel if-chains that have
+to agree by hand. Pinned by `tests/websocket_identifier_test.cpp`.
 
-### Message Types
+Discriminators are only applied where a live message is known to echo the field. The ten types
+marked ✓keyed below route per coin/user; the rest route on the subscription type alone, which
+can over-deliver to a second subscriber of the same type but can never drop a message. Promote
+one to keyed by filling in `sub_key`/`msg_key` once a live payload confirms the field.
 
-- [ ] `WsTrade`, `WsBook`, `WsBbo`, `WsLevel`, `AllMids`, `Candle`, `Notification`
-- [ ] `WsUserEvent` variants: `WsFill`, `WsUserFunding`, `WsLiquidation`, `WsNonUserCancel`
-- [ ] `WsOrder` / `WsBasicOrder`
-- [ ] `WsActiveAssetCtx`, `WsActiveSpotAssetCtx`, `PerpsAssetCtx`, `SpotAssetCtx`
-- [ ] `WsActiveAssetData`
-- [ ] `TwapState`, `WsTwapHistory`, `WsUserTwapHistory`, `WsTwapSliceFill`, `WsUserTwapSliceFills`
-- [ ] `WebData3`, `PerpDexState`, `LeadingVault`
-- [ ] `ClearinghouseState`, `InnerClearinghouseState`, `MarginSummary`, `AssetPosition`
-- [ ] `WsSpotState`, `SpotState`, `UserBalance`
-- [ ] `WsAllDexsClearinghouseState`, `WsAllDexsAssetCtxs`
-- [ ] `WsOutcomeMetaUpdates`, `OutcomeSpec`, `QuestionSpec`
-- [ ] `WsFastAssetCtxs`
-- [ ] `WsUserNonFundingLedgerUpdate` and its 12 delta variants (deposit, withdraw,
-      internalTransfer, subAccountTransfer, liquidation, vaultCreate/Deposit/Distribution,
-      vaultWithdraw, vaultLeaderCommission, spotTransfer, accountClassTransfer, spotGenesis,
-      rewardsClaim)
+- [x] `allMids` (takes optional `dex`; spot mids only ride along with the first perp dex)
+- [x] `notification`
+- [x] `webData3` ✓keyed by user — replaces the old `webData2`
+- [x] `twapStates`
+- [x] `clearinghouseState` (per-dex)
+- [x] `openOrders` (per-dex)
+- [x] `candle` ✓keyed by coin+interval (subscription says `coin`/`interval`, message says `s`/`i`)
+- [x] `l2Book` ✓keyed by coin (optional `nSigFigs`, `mantissa`, `fast` pass through untouched)
+- [x] `trades` ✓keyed by coin (message is an array; routes on element 0)
+- [x] `orderUpdates`
+- [x] `userEvents` (inbound channel name is `"user"`, handled)
+- [x] `userFills` ✓keyed by user (optional `aggregateByTime`)
+- [x] `userFundings` ✓keyed by user
+- [x] `userNonFundingLedgerUpdates` ✓keyed by user
+- [x] `activeAssetCtx` ✓keyed by coin (channel is `activeSpotAssetCtx` for spot; aliased)
+- [x] `activeAssetData` ✓keyed by coin+user (perps only)
+- [x] `userTwapSliceFills`
+- [x] `userTwapHistory`
+- [x] `bbo` ✓keyed by coin
+- [x] `spotState` (optional `isPortfolioMargin`)
+- [x] `allDexsClearinghouseState`
+- [x] `allDexsAssetCtxs`
+- [x] `outcomeMetaUpdates` (prediction markets)
+- [x] `fastAssetCtxs` — decoded automatically. This is the only subscription whose payload is
+      not plain JSON: base64 wrapping **raw DEFLATE** (RFC 1951, no zlib/gzip wrapper), decoded
+      base64 → inflate (zlib `windowBits = -15`) → UTF-8 → JSON before it reaches a callback,
+      so subscribers see the same shape as every other channel. `decodeFastAssetCtxs()` is also
+      public for payloads captured elsewhere; it returns `std::optional` and never throws, since
+      it runs on the socket thread against untrusted input. Inflation is capped at 32 MB.
+      First message is a snapshot; later messages carry only changed coins, and a coin's
+      unchanged fields are omitted from its delta. Pinned against the documented
+      payload/decoding pair in `tests/websocket_identifier_test.cpp`.
+
+### Message Types — DONE
+
+In `include/hyperliquid/ws_types.hpp` / `src/ws_types.cpp`, as nlohmann `from_json`
+conversions found by ADL. **Strictly opt-in**: callbacks still receive raw `nlohmann::json`
+per CLAUDE.md §5, and nothing converts unless you ask for it:
+
+```cpp
+ws.subscribe(json{{"type","l2Book"},{"coin","ETH"}}, [](const json& msg) {
+    const auto book = msg["data"].get<hyperliquid::WsBook>();
+});
+```
+
+**The docs are wrong about numeric types, and it matters.** Every price and quantity the
+TypeScript definitions declare as `number` is sent as a *decimal string* on the live wire —
+verified against the API for `markPx`, `midPx`, `funding`, `openInterest`, `oraclePx`,
+`dayNtlVlm`, `prevDayPx`, `accountValue`, `totalNtlPos`, `totalRawUsd`, `totalMarginUsed`,
+`withdrawable`, and candle `o`/`c`/`h`/`l`/`v`. A strict `get<double>()` compiles and then
+throws on the first real message. Every such field is read through a converter accepting
+either form. Fields the docs declare as `string` stay `std::string`, which also preserves
+exact decimal precision on the money-carrying fill and order fields.
+
+- [x] `WsTrade`, `WsBook`, `WsBbo`, `WsLevel`, `AllMids`, `Candle`, `Notification`
+- [x] `WsUserEvent` variants: `WsFill`, `WsUserFunding`, `WsLiquidation`, `WsNonUserCancel`,
+      plus `FillLiquidation` and the `WsUserFills` wrapper
+- [x] `WsOrder` / `WsBasicOrder`
+- [x] `WsActiveAssetCtx`, `WsActiveSpotAssetCtx`, `PerpsAssetCtx`, `SpotAssetCtx`
+- [x] `WsActiveAssetData`, plus `Leverage` (referenced but never defined in the WS docs;
+      layout taken from the info endpoint and confirmed live as `{"type":"cross","value":20}`)
+- [x] `TwapState`, `WsTwapHistory`, `WsUserTwapHistory`, `WsTwapSliceFill`,
+      `WsUserTwapSliceFills`, `TwapStates`
+- [x] `WebData3`, `WebData3UserState`, `PerpDexState`, `LeadingVault`
+- [x] `ClearinghouseState`, `InnerClearinghouseState`, `MarginSummary`, `AssetPosition`,
+      `OpenOrders`
+- [x] `WsSpotState`, `SpotState`, `UserBalance`
+- [x] `WsAllDexsClearinghouseState`, `WsAllDexsAssetCtxs`
+- [x] `WsOutcomeMetaUpdates`, `WsOutcomeMetaUpdate`, `OutcomeSpec`, `OutcomeSideSpec`,
+      `QuestionSpec`
+- [x] `WsFastAssetCtxs` / `FastAssetCtx` — both fields optional, since after the snapshot each
+      message carries only changed coins and only their changed fields
+- [x] `WsUserNonFundingLedgerUpdate` and its 12 delta variants as a `std::variant`, dispatched
+      on the `type` tag. The three vault deltas (`vaultCreate`/`vaultDeposit`/
+      `vaultDistribution`) share one `WsVaultDelta` struct that retains the tag, because they
+      share one layout. An unrecognised `type` throws rather than silently decoding as a
+      default-constructed deposit.
+
+Two fields stay raw `nlohmann::json` on purpose: `AssetPosition::position` and
+`OpenOrders::orders`. The websocket docs name the inner `Position` and `Order` types without
+defining them, and inventing a layout from another endpoint risks being silently wrong.
+
+**Union style follows the wire.** `WsUserEvent` and `WsOutcomeMetaUpdate` use
+`std::optional` members because those unions are expressed by which key is present.
+`WsLedgerUpdate` uses `std::variant` because it carries an explicit `type` discriminator.
+
+- [x] `WsUserFundings` and `WsUserNonFundingLedgerUpdates` envelopes. The docs never define
+      these wrappers; the field names were read off live payloads
+      (`{fundings, isSnapshot, user}` and `{isSnapshot, nonFundingLedgerUpdates, user}`).
+
+Covered by `tests/ws_types_test.cpp` (34 checks) against real wire shapes, not the documented
+ones. **Every type reachable with a real account has now been validated against live mainnet
+data**, using `0xcf3f419d…f95f` for the account feeds and `0xa8cde6a1…7275` for TWAP:
+
+`WsBook`, `WsTrade`, `WsBbo`, `Candle`, `AllMids`, `WsActiveAssetCtx`, `WsActiveSpotAssetCtx`,
+`WsFastAssetCtxs` (1241 coins), `WsAllDexsAssetCtxs` (10 dexs), `ClearinghouseState`,
+`OpenOrders` (109 orders), `WsOrder`, `WsUserEvent`, `Notification`, `WebData3` (10 dex
+states), `WsSpotState`, `WsActiveAssetData`, `WsAllDexsClearinghouseState`, `WsUserFills`,
+`WsUserFundings` (100 entries), `WsUserNonFundingLedgerUpdates` (58 entries), `TwapStates`,
+`WsUserTwapHistory`, `WsUserTwapSliceFills`, plus `InnerClearinghouseState` (175 positions),
+`Leverage` and `WsFill` (2000 fills) off the info endpoint. Zero conversion failures.
+
+### Further ways the docs diverge from the wire
+
+Found by running the types against live accounts. Each one broke something before it was fixed:
+
+- **`webData3` carries no top-level `user`** — the address is nested under `userState`. The
+  routing table had keyed it on a flat `data["user"]`, so every message matched no subscription
+  and was dropped. It now routes on the channel name alone, and `messageToIdentifier()` falls
+  back to the bare type whenever a routing field is missing, so this class of mistake
+  over-delivers instead of silently dropping. Pinned in `tests/websocket_identifier_test.cpp`.
+- **`WsTwapHistory.status.description` does not exist.** The docs mark it required; every live
+  status object is `{"status": "activated"}` alone. Requiring it threw on every real message.
+  Now optional.
+- **`WsTwapHistory` carries an undocumented `twapId`**, the only way to tie an entry back to a
+  running TWAP. Now exposed as `twap_id`.
+- **TWAP status values beyond the documented four.** The docs list
+  activated/terminated/finished/error; `waitingForTrigger` appears live. `status` is a plain
+  string, so this needs no change — but do not switch exhaustively on it.
+- **A 13th ledger delta type, `send`**, is absent from the docs' list of 12 and is what
+  `sendAsset` actually produces. Modelled as `WsSend` (distinct from `WsSpotTransfer`: it also
+  carries `sourceDex`, `destinationDex` and `nativeTokenFee`).
+- Because that list proved incomplete, an unrecognised delta now decodes to `WsUnknownDelta`
+  (type plus raw JSON) rather than throwing. One unknown entry used to make an entire
+  account's ledger feed unreadable.
+- Undocumented fields ignored harmlessly: `twapId` on fills, `nSamples` on fundings,
+  `stopPx`/`trigger` on TWAP states, `abstraction` on the webData3 user state,
+  `destinationDex`/`feeToken`/`nativeTokenFee` on transfer deltas.
+
+- [ ] `WsUserEvent`'s funding, liquidation and nonUserCancel arms are still unexercised — only
+      the `fills` arm appeared live. Same for most ledger delta variants: only `send` and
+      `subAccountTransfer` were observed on the test account.
 
 ---
 
@@ -160,7 +267,12 @@ Neither exists in the Python SDK; implemented from the docs directly, like TWAP.
 
 ### Agents, Referrals, Builders
 
-- [ ] `approveAgent()` - action `approveAgent`
+- [x] `approveAgent()` - action `approveAgent`. Generates the agent key locally (OpenSSL
+      `RAND_bytes`) and returns `{response, agent_key}` like Python. User-signed
+      (`HyperliquidTransaction:ApproveAgent`); signed with `agentName: ""` when unnamed but the
+      field is omitted from the wire (Python SDK parity). Signatures (named + unnamed) pinned
+      against the Python SDK in `tests/approve_agent_test.cpp`. Example in
+      `examples/approve_agent.cpp`.
 - [x] `approveBuilderFee()` - action `approveBuilderFee`. User-signed
       (`HyperliquidTransaction:ApproveBuilderFee`); `builder` is an EIP-712 `address` field —
       first use of that encoding, signature pinned against the Python SDK in
@@ -337,7 +449,9 @@ Our `Meta` type does not model any of these.
 - [ ] HTTP connection pooling
 - [ ] Metadata caching improvements
 - [ ] Async support (C++20 coroutines)
-- [ ] Zero-copy message parsing (matters most for `fastAssetCtxs` and `l2Book`)
+- [ ] Zero-copy message parsing (matters most for `fastAssetCtxs` and `l2Book`). Today every
+      websocket message costs one `json::parse` plus one identifier string, and `fastAssetCtxs`
+      additionally costs a base64 decode and an inflate into a fresh buffer.
 
 ### Platform
 
@@ -380,10 +494,10 @@ Our `Meta` type does not model any of these.
 | Margin Tables | ✅ | ❌ | TODO |
 | Borrow/Lend | ✅ | ❌ | TODO |
 | **Real-Time** |
-| WebSocket (24 subscriptions) | ✅ | ❌ | TODO |
+| WebSocket (24 subscriptions) | ✅ | ✅ | Complete (raw JSON callbacks; no typed structs) |
 | WebSocket POST requests | ✅ | ❌ | TODO |
 | **Advanced** |
-| Agents / Referrals / Builders | ✅ | ⚠️ | Partial (`approveBuilderFee` + read queries; `approveAgent`, `setReferrer` missing) |
+| Agents / Referrals / Builders | ✅ | ⚠️ | Partial (`approveAgent`, `approveBuilderFee` + read queries; `setReferrer` missing) |
 | Dex Abstraction | ✅ | ⚠️ | Read-only (queries done, actions missing) |
 | Staking | ✅ | ❌ | TODO |
 | Prediction Markets / Outcomes | ✅ | ❌ | TODO |
@@ -395,10 +509,10 @@ Our `Meta` type does not model any of these.
 
 ## Roadmap
 
-### Phase 1: WebSocket
-Everything real-time is blocked on this. Start with the manager + `l2Book`, `trades`, `allMids`,
-`userFills`, `orderUpdates`; add the remaining 19 subscriptions after. Note `fastAssetCtxs` needs
-raw-DEFLATE decompression, and `webData2` no longer exists.
+### Phase 1: WebSocket — MOSTLY DONE
+Manager and all 24 subscriptions ship, delivering raw `nlohmann::json` to callbacks per
+CLAUDE.md §5, including `fastAssetCtxs` base64 + raw-DEFLATE decoding. Still open: WS POST
+requests and the typed message structs.
 
 ### Phase 2: Order Types & Rate Limits — DONE
 ~~TWAP orders~~, ~~`reserveRequestWeight`~~, ~~`topUpIsolatedOnlyMargin`~~ all done.
@@ -434,7 +548,7 @@ Tests, CI, packaging, docs, cross-platform.
 
 ## Notes
 
-- **Biggest gaps, in order**: WebSocket, TWAP orders, staking, borrow/lend, sub-accounts.
+- **Biggest gaps, in order**: staking, borrow/lend, sub-accounts, WS POST requests.
 - **Silent drift to watch**: the docs added `marginTables` / `marginMode` / `growthMode` to `meta`
   and deprecated `onlyIsolated`. Our `Meta` type ignores all of it, so HIP-3 dex assets are
   under-modeled today.
@@ -442,6 +556,6 @@ Tests, CI, packaging, docs, cross-platform.
 
 ---
 
-**Last Updated**: 2026-07-14
+**Last Updated**: 2026-07-28
 **Rebuilt from**: Hyperliquid docs (Info, Exchange, WebSocket endpoints) via MCP
 **C++ SDK Version**: 1.0.0

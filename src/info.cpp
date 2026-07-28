@@ -1,6 +1,11 @@
 #include "hyperliquid/info.hpp"
+#include "hyperliquid/errors.hpp"
 #include "hyperliquid/utils/constants.hpp"
 #include <stdexcept>
+
+#ifdef HYPERLIQUID_WEBSOCKET
+#include "hyperliquid/websocket_manager.hpp"
+#endif
 
 namespace hyperliquid {
 
@@ -12,7 +17,67 @@ Info::Info(const std::string& base_url,
           int timeout_ms)
     : API(base_url.empty() ? MAINNET_API_URL : base_url, timeout_ms) {
     initializeMetadata(meta, spot_meta, perp_dexs);
+
+#ifdef HYPERLIQUID_WEBSOCKET
+    if (!skip_ws) {
+        ws_manager_ = std::make_unique<WebSocketManager>(base_url_);
+        ws_manager_->start();
+    }
+#else
+    if (!skip_ws) {
+        throw Error("this build has no websocket support; rebuild with -DBUILD_WEBSOCKET=ON");
+    }
+#endif
 }
+
+// Defined here, where WebSocketManager is a complete type, so ~unique_ptr can
+// see its destructor.
+Info::~Info() = default;
+
+#ifdef HYPERLIQUID_WEBSOCKET
+
+WebSocketManager& Info::requireWebSocket() const {
+    if (!ws_manager_) {
+        throw Error("websocket not enabled; construct Info with skip_ws = false");
+    }
+    return *ws_manager_;
+}
+
+int Info::subscribe(const nlohmann::json& subscription,
+                    std::function<void(const nlohmann::json&)> callback) {
+    return requireWebSocket().subscribe(subscription, std::move(callback));
+}
+
+bool Info::unsubscribe(const nlohmann::json& subscription, int subscription_id) {
+    return requireWebSocket().unsubscribe(subscription, subscription_id);
+}
+
+void Info::disconnectWebsocket() {
+    if (ws_manager_) {
+        ws_manager_->stop();
+    }
+}
+
+#else
+
+// requireWebSocket() is intentionally left undefined here: nothing can call it
+// when there is no manager to return.
+namespace {
+constexpr const char* kNoWebSocketBuild =
+    "this build has no websocket support; rebuild with -DBUILD_WEBSOCKET=ON";
+}
+
+int Info::subscribe(const nlohmann::json&, std::function<void(const nlohmann::json&)>) {
+    throw Error(kNoWebSocketBuild);
+}
+
+bool Info::unsubscribe(const nlohmann::json&, int) {
+    throw Error(kNoWebSocketBuild);
+}
+
+void Info::disconnectWebsocket() {}
+
+#endif
 
 void Info::initializeMetadata(const Meta* meta,
                               const SpotMeta* spot_meta,

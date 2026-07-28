@@ -9,6 +9,10 @@ set(TESTS
     l1_action_signing_test
 )
 
+if(BUILD_WEBSOCKET)
+    list(APPEND TESTS websocket_identifier_test ws_types_test)
+endif()
+
 foreach(TEST ${TESTS})
     add_executable(${TEST} ${TEST}.cpp)
     target_link_libraries(${TEST} PRIVATE hyperliquid)

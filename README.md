@@ -68,8 +68,10 @@ export HYPERLIQUID_PRIVATE_KEY="0x..."
 - CMake 3.15+
 - libcurl
 - OpenSSL 3.0+
+- zlib (websocket builds only, for `fastAssetCtxs` payloads)
 - nlohmann/json (auto-downloaded via CMake)
 - msgpack-c (auto-downloaded via CMake)
+- IXWebSocket (auto-downloaded via CMake; disable with `-DBUILD_WEBSOCKET=OFF`)
 
 ## Installation
 
@@ -182,7 +184,7 @@ export HYPERLIQUID_PRIVATE_KEY="0x..."
 
 ## Examples
 
-The SDK includes four working examples in the `examples/` directory:
+Working examples live in the `examples/` directory. The main ones:
 
 ### 1. Basic Order (`basic_order.cpp`)
 
@@ -216,6 +218,18 @@ Place and cancel multiple orders in a single request:
 ```bash
 ./build/examples/bulk_orders
 ```
+
+### 5. TWAP Order (`twap_order.cpp`)
+
+Place a TWAP, watch its slice fills, then cancel the remainder. Note this example
+sleeps 65 seconds to let the first suborders execute:
+
+```bash
+./build/examples/twap_order
+```
+
+Other examples cover funding history, historical orders, user fees, candles, account
+queries, and perp deployment queries.
 
 ## API Documentation
 
@@ -279,6 +293,53 @@ nlohmann::json modifyOrder(const OidOrCloid& oid,
 nlohmann::json bulkModifyOrders(const std::vector<ModifyRequest>& modifies);
 ```
 
+#### TWAP Operations
+
+A TWAP splits one large order into suborders executed every 30 seconds over the
+requested duration, each with a maximum slippage of 3%.
+
+```cpp
+// Place a TWAP: spread the order over `minutes`
+nlohmann::json twapOrder(const std::string& coin,
+                        bool is_buy,
+                        double sz,          // total size across the whole TWAP
+                        int minutes,        // duration to spread it over
+                        bool reduce_only = false,
+                        bool randomize = false);  // randomize suborder timing
+
+// Cancel a running TWAP by its id
+nlohmann::json twapCancel(const std::string& coin, int64_t twap_id);
+```
+
+`sz` is rounded to the asset's `szDecimals`, same as `order()`.
+
+**Checking the result is not optional.** A rejected TWAP still returns HTTP 200 with
+`"status": "ok"` at the top level — the real outcome lives in `response.data.status`,
+which is either `{"running": {"twapId": N}}` or `{"error": "..."}`:
+
+```cpp
+auto result = exchange.twapOrder("ETH", true, 0.1, 30);
+
+auto status = result["response"]["data"]["status"];
+if (status.contains("error")) {
+    std::cerr << "TWAP rejected: " << status["error"].get<std::string>() << "\n";
+    return 1;
+}
+
+int64_t twap_id = status["running"]["twapId"];
+
+// Watch it execute
+auto fills = exchange.info_.userTwapSliceFills(address);
+
+// Cancel the remainder. Failure surfaces the same way.
+auto cancel_result = exchange.twapCancel("ETH", twap_id);
+auto cancel_status = cancel_result["response"]["data"]["status"];
+bool ok = cancel_status.is_string() && cancel_status == "success";
+```
+
+Valid TWAP durations are enforced by the API, not by the SDK — an out-of-range
+duration comes back as `"Invalid TWAP duration: N min(s)"`.
+
 #### Transfer Operations
 
 ```cpp
@@ -289,14 +350,68 @@ nlohmann::json usdTransfer(double amount, const std::string& destination);
 nlohmann::json spotTransfer(double amount,
                            const std::string& destination,
                            const std::string& token);
+
+// Move USDC between your own spot and perp balances
+// (to_perp=true: spot -> perp, false: perp -> spot)
+nlohmann::json usdClassTransfer(double amount, bool to_perp);
+
+// Transfer a token between dexes ("" = default perp dex, "spot" = spot).
+// With a perp dex involved, token must be that dex's collateral token.
+nlohmann::json sendAsset(const std::string& destination,
+                        const std::string& source_dex,
+                        const std::string& destination_dex,
+                        const std::string& token,
+                        double amount);
 ```
 
-#### Leverage Management
+#### Agents
+
+```cpp
+// Approve an agent (API) wallet that can sign orders/cancels for this account
+// but cannot transfer funds. Generates the agent key locally and returns it
+// alongside the response - persist it, it is shown nowhere else.
+// Must be signed by the account's own wallet.
+std::pair<nlohmann::json, std::string> approveAgent(
+    const std::optional<std::string>& name = std::nullopt);
+
+// Later: trade as the agent
+auto [result, agent_key] = exchange.approveAgent("mybot");
+auto agent_wallet = Wallet::fromPrivateKey(agent_key);
+Exchange agent_exchange(agent_wallet, MAINNET_API_URL, nullptr, "",
+                        /*account_address=*/master_address);
+```
+
+#### Builder Fees
+
+```cpp
+// Approve a max builder fee rate (percent string) for a builder address.
+// Must be signed by the account's own wallet, not an agent wallet.
+// Verify with info_.maxBuilderFee(user, builder).
+nlohmann::json approveBuilderFee(const std::string& builder,
+                                const std::string& max_fee_rate);  // e.g. "0.001%"
+```
+
+#### Leverage & Margin Management
 
 ```cpp
 nlohmann::json updateLeverage(int leverage,
                              const std::string& coin,
                              bool is_cross = true);
+
+// Add (positive) or remove (negative) a fixed USDC amount of isolated margin
+nlohmann::json updateIsolatedMargin(double amount, const std::string& coin);
+
+// Top up an isolated position so its effective leverage drops to the target.
+// The exchange computes the margin to add; this never removes margin.
+nlohmann::json topUpIsolatedOnlyMargin(const std::string& coin, double leverage);
+```
+
+#### Rate Limits
+
+```cpp
+// Buy extra request weight instead of being throttled.
+// Check current usage with exchange.info_.userRateLimit(address).
+nlohmann::json reserveRequestWeight(int64_t weight);
 ```
 
 ### Info Class
@@ -369,6 +484,16 @@ trigger.trigger = TriggerOrderType{
 };
 ```
 
+### TWAP Orders
+
+TWAP is not an `OrderType` — it is a separate action with its own method. See
+[TWAP Operations](#twap-operations).
+
+```cpp
+// Buy 0.1 ETH spread over 30 minutes
+exchange.twapOrder("ETH", true, 0.1, 30);
+```
+
 ## Asset IDs
 
 The SDK automatically handles asset ID mapping:
@@ -435,6 +560,21 @@ hyperliquid::Exchange exchange(wallet, hyperliquid::MAINNET_API_URL);
 // or simply
 hyperliquid::Exchange exchange(wallet);  // defaults to mainnet
 ```
+
+### Running the unit tests
+
+Tests mock the HTTP layer, so they need no network and no private key:
+
+```bash
+cmake -S . -B build -DBUILD_TESTS=ON
+cmake --build build
+cd build && ctest --output-on-failure
+```
+
+Tests assert with `assert()`, and the build defaults to `Release` (which defines
+`NDEBUG` and would compile every assert away). Test targets therefore force
+`-UNDEBUG` in `tests/CMakeLists.txt` — keep that on any new test target, or the
+test will pass no matter what it claims to check.
 
 ## Troubleshooting
 
