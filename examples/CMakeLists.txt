@@ -18,6 +18,7 @@ set(EXAMPLES
     send_asset
     approve_builder_fee
     approve_agent
+    sub_accounts
 )
 
 if(BUILD_WEBSOCKET)

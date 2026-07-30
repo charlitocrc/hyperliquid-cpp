@@ -261,9 +261,22 @@ Neither exists in the Python SDK; implemented from the docs directly, like TWAP.
 
 ### Sub-Accounts
 
-- [ ] `createSubAccount()`
-- [ ] `subAccountTransfer()`
-- [ ] `subAccountSpotTransfer()`
+All three are plain L1 actions, but they act on the master account: a
+vault/subaccount configured on the Exchange is neither signed over nor sent.
+The Python SDK signs them with no vault yet still puts the configured vault in
+the envelope, so the signature does not cover the vault it ships with and the
+server cannot verify it — we omit it from both instead. Shared with
+`setReferrer()` via `actionIgnoresVault()` in `src/exchange.cpp`.
+
+- [x] `createSubAccount()` - action `createSubAccount`; wire `{type, name}`. Response carries
+      the new sub-account address, which the transfers below take.
+- [x] `subAccountTransfer()` - action `subAccountTransfer`; wire
+      `{type, subAccountUser, isDeposit, usd}`, usd in micro-USDC.
+- [x] `subAccountSpotTransfer()` - action `subAccountSpotTransfer`; wire
+      `{type, subAccountUser, isDeposit, token, amount}`, amount via `floatToWire`
+      (Python sends `str(amount)`).
+- [x] Vault-exclusion cases in `tests/l1_action_signing_test.cpp`, example in
+      `examples/sub_accounts.cpp`
 
 ### Agents, Referrals, Builders
 
@@ -277,7 +290,10 @@ Neither exists in the Python SDK; implemented from the docs directly, like TWAP.
       (`HyperliquidTransaction:ApproveBuilderFee`); `builder` is an EIP-712 `address` field —
       first use of that encoding, signature pinned against the Python SDK in
       `tests/approve_builder_fee_test.cpp`. Example in `examples/approve_builder_fee.cpp`.
-- [ ] `setReferrer()`
+- [x] `setReferrer()` - action `setReferrer`; wire `{type, code}`. Plain L1 action, but acts
+      on the master account and so ignores a configured vault — see the Sub-Accounts note.
+      One shot per account, and only before it has traded. Covered in
+      `tests/l1_action_signing_test.cpp`; shown (commented out) in `examples/sub_accounts.cpp`.
 
 ### Abstraction
 

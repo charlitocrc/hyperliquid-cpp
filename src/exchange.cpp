@@ -23,6 +23,21 @@ Exchange::Exchange(std::shared_ptr<Wallet> wallet,
       expires_after_(std::nullopt) {
 }
 
+// Account-level actions that operate on the master account and never on a
+// configured vault/subaccount, so the vault is neither signed over nor sent.
+//
+// The Python SDK signs these with no vault but still puts the configured vault
+// in the envelope. The signature would then not cover the vault it is sent
+// with, so the server cannot verify it; we omit it from both instead. Only
+// reachable when an Exchange has a vault_address configured.
+// ponytail: a plain list, a lookup table does not pay for itself at four entries.
+static bool actionIgnoresVault(const std::string& action_type) {
+    return action_type == "setReferrer" ||
+           action_type == "createSubAccount" ||
+           action_type == "subAccountTransfer" ||
+           action_type == "subAccountSpotTransfer";
+}
+
 nlohmann::json Exchange::postAction(const nlohmann::json& action,
                                     const Signature& signature,
                                     int64_t nonce) {
@@ -35,7 +50,7 @@ nlohmann::json Exchange::postAction(const nlohmann::json& action,
     // Add vault address if not a transfer action
     std::string action_type = action["type"];
     if (action_type != "usdClassTransfer" && action_type != "sendAsset") {
-        if (!vault_address_.empty()) {
+        if (!vault_address_.empty() && !actionIgnoresVault(action_type)) {
             payload["vaultAddress"] = vault_address_;
         } else {
             payload["vaultAddress"] = nullptr;
@@ -55,8 +70,10 @@ nlohmann::json Exchange::postAction(const nlohmann::json& action,
 nlohmann::json Exchange::postL1Action(const nlohmann::ordered_json& action) {
     const int64_t nonce = getTimestampMs();
 
-    std::optional<std::string> vault_opt = vault_address_.empty() ?
-        std::nullopt : std::optional<std::string>(vault_address_);
+    std::optional<std::string> vault_opt;
+    if (!vault_address_.empty() && !actionIgnoresVault(action["type"])) {
+        vault_opt = vault_address_;
+    }
 
     auto signature = signL1Action(*wallet_, action, vault_opt, nonce,
                                  expires_after_, base_url_ == MAINNET_API_URL);
@@ -569,6 +586,66 @@ nlohmann::json Exchange::topUpIsolatedOnlyMargin(const std::string& coin, double
     // The API wants leverage as a float string ("5" not 5.0); floatToWire
     // normalizes trailing zeros the same way order prices are encoded.
     action["leverage"] = floatToWire(leverage);
+
+    return postL1Action(action);
+}
+
+nlohmann::json Exchange::setReferrer(const std::string& code) {
+    if (code.empty()) {
+        throw std::invalid_argument("setReferrer code must not be empty");
+    }
+
+    nlohmann::ordered_json action;
+    action["type"] = "setReferrer";
+    action["code"] = code;
+
+    return postL1Action(action);
+}
+
+nlohmann::json Exchange::createSubAccount(const std::string& name) {
+    if (name.empty()) {
+        throw std::invalid_argument("createSubAccount name must not be empty");
+    }
+
+    nlohmann::ordered_json action;
+    action["type"] = "createSubAccount";
+    action["name"] = name;
+
+    return postL1Action(action);
+}
+
+nlohmann::json Exchange::subAccountTransfer(const std::string& sub_account_user,
+                                            bool is_deposit,
+                                            int64_t usd) {
+    if (usd <= 0) {
+        throw std::invalid_argument("subAccountTransfer usd must be positive");
+    }
+
+    nlohmann::ordered_json action;
+    action["type"] = "subAccountTransfer";
+    action["subAccountUser"] = sub_account_user;
+    action["isDeposit"] = is_deposit;
+    action["usd"] = usd;
+
+    return postL1Action(action);
+}
+
+nlohmann::json Exchange::subAccountSpotTransfer(const std::string& sub_account_user,
+                                                bool is_deposit,
+                                                const std::string& token,
+                                                double amount) {
+    if (token.empty()) {
+        throw std::invalid_argument("subAccountSpotTransfer token must not be empty");
+    }
+
+    nlohmann::ordered_json action;
+    action["type"] = "subAccountSpotTransfer";
+    action["subAccountUser"] = sub_account_user;
+    action["isDeposit"] = is_deposit;
+    action["token"] = token;
+    // Python sends str(amount); floatToWire is this SDK's equivalent and
+    // throws rather than silently rounding past 8 decimals.
+    action["amount"] = floatToWire(amount);
 
     return postL1Action(action);
 }

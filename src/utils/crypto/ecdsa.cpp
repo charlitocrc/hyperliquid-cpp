@@ -1,3 +1,9 @@
+// The EC_KEY API is deprecated in OpenSSL 3.0 but not removed, and it still
+// works. Porting to EVP_PKEY/OSSL_PARAM buys nothing here, so silence the
+// deprecation notes rather than drown real warnings in them.
+// ponytail: revisit if OpenSSL 4.x actually drops EC_KEY.
+#define OPENSSL_SUPPRESS_DEPRECATED
+
 #include "hyperliquid/types.hpp"
 #include "hyperliquid/utils/conversions.hpp"
 #include <openssl/ec.h>
@@ -34,13 +40,10 @@ std::string bnToHex(const BIGNUM* bn, int min_bytes = 32) {
     std::ostringstream oss;
     oss << std::hex << std::setfill('0');
 
-    // Skip leading zeros (but keep at least one byte)
-    size_t start = 0;
-    while (start < bytes.size() - 1 && bytes[start] == 0) {
-        start++;
-    }
-
-    for (size_t i = start; i < bytes.size(); i++) {
+    // Every byte, including leading zeros: signature r/s are fixed-width
+    // 32-byte quantities. Stripping a leading zero byte yields a 62-char hex
+    // string that the API rejects, which happens to ~1 in 256 signatures.
+    for (size_t i = 0; i < bytes.size(); i++) {
         oss << std::setw(2) << static_cast<int>(bytes[i]);
     }
     return oss.str();

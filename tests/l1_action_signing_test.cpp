@@ -269,9 +269,125 @@ void vaultAndExpiresAfterTogether() {
     assertSignedCorrectly(exchange, action, TEST_VAULT, 1800000000000);
 }
 
+// setReferrer and the subAccount* actions act on the master account. Each is
+// driven from an Exchange that HAS a vault configured, but asserted against a
+// signature recomputed with no vault -- so if postL1Action ever starts signing
+// these with vault_address_, or postAction starts putting it in the envelope,
+// these fail.
+
+void setReferrerIgnoresConfiguredVault() {
+    TestExchange exchange(TEST_VAULT);
+
+    exchange.setReferrer("HYPERLIQUID");
+
+    nlohmann::ordered_json action;
+    action["type"] = "setReferrer";
+    action["code"] = "HYPERLIQUID";
+
+    assertSignedCorrectly(exchange, action, "", std::nullopt);
+}
+
+void createSubAccountIgnoresConfiguredVault() {
+    TestExchange exchange(TEST_VAULT);
+
+    exchange.createSubAccount("desk-1");
+
+    nlohmann::ordered_json action;
+    action["type"] = "createSubAccount";
+    action["name"] = "desk-1";
+
+    assertSignedCorrectly(exchange, action, "", std::nullopt);
+}
+
+void subAccountTransferIgnoresConfiguredVault() {
+    TestExchange exchange(TEST_VAULT);
+
+    exchange.subAccountTransfer(TEST_VAULT, true, 1000000);
+
+    nlohmann::ordered_json action;
+    action["type"] = "subAccountTransfer";
+    action["subAccountUser"] = TEST_VAULT;
+    action["isDeposit"] = true;
+    action["usd"] = 1000000;
+
+    assertSignedCorrectly(exchange, action, "", std::nullopt);
+}
+
+void subAccountSpotTransferIgnoresConfiguredVault() {
+    TestExchange exchange(TEST_VAULT);
+
+    exchange.subAccountSpotTransfer(TEST_VAULT, false, "PURR:0x1", 1.5);
+
+    nlohmann::ordered_json action;
+    action["type"] = "subAccountSpotTransfer";
+    action["subAccountUser"] = TEST_VAULT;
+    action["isDeposit"] = false;
+    action["token"] = "PURR:0x1";
+    action["amount"] = "1.5";
+
+    assertSignedCorrectly(exchange, action, "", std::nullopt);
+}
+
+// The vault exclusion is per action type, not a global switch: an ordinary
+// action from the same Exchange must still sign and send the vault.
+void subAccountExclusionDoesNotLeakToOtherActions() {
+    TestExchange exchange(TEST_VAULT);
+
+    exchange.cancel("BTC", 7);
+
+    nlohmann::ordered_json cancel_obj;
+    cancel_obj["a"] = 0;
+    cancel_obj["o"] = 7;
+
+    nlohmann::ordered_json action;
+    action["type"] = "cancel";
+    action["cancels"] = nlohmann::ordered_json::array({cancel_obj});
+
+    assertSignedCorrectly(exchange, action, TEST_VAULT, std::nullopt);
+}
+
+// r and s are fixed-width 32-byte quantities. A value whose top byte is zero
+// must still serialize to 64 hex chars -- an encoder that strips the leading
+// zero yields a 62-char component the API rejects, on roughly 1 signature in
+// 256. Sign a fixed sweep of hashes: deterministic signing makes this a fixed
+// pass/fail, and 600 hashes cover the leading-zero case several times over.
+void signatureComponentsAreFixedWidth() {
+    auto wallet = Wallet::fromPrivateKey(TEST_PRIVATE_KEY);
+
+    int leading_zero_cases = 0;
+
+    for (int i = 0; i < 600; ++i) {
+        std::vector<uint8_t> hash(32, 0);
+        hash[28] = static_cast<uint8_t>(i >> 24);
+        hash[29] = static_cast<uint8_t>(i >> 16);
+        hash[30] = static_cast<uint8_t>(i >> 8);
+        hash[31] = static_cast<uint8_t>(i);
+
+        const Signature sig = wallet->signMessage(hash);
+
+        // "0x" + 64 hex chars.
+        assert(sig.r.size() == 66);
+        assert(sig.s.size() == 66);
+
+        if (sig.r.compare(2, 2, "00") == 0 || sig.s.compare(2, 2, "00") == 0) {
+            leading_zero_cases++;
+        }
+    }
+
+    // Guards the guard: if the sweep stops producing leading-zero components,
+    // the asserts above are no longer exercising the padding path.
+    assert(leading_zero_cases > 0);
+}
+
 } // namespace
 
 int main() {
+    signatureComponentsAreFixedWidth();
+    setReferrerIgnoresConfiguredVault();
+    createSubAccountIgnoresConfiguredVault();
+    subAccountTransferIgnoresConfiguredVault();
+    subAccountSpotTransferIgnoresConfiguredVault();
+    subAccountExclusionDoesNotLeakToOtherActions();
     cancelSignsExpectedAction();
     updateLeverageSignsExpectedAction();
     scheduleCancelSignsExpectedAction();

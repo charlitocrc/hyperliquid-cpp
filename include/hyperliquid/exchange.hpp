@@ -234,6 +234,71 @@ public:
                                     const std::string& max_fee_rate);
 
     /**
+     * Set the referral code credited for this account's trading fees. An
+     * account can only be referred once, and only before it has traded.
+     *
+     * Wire action: {"type": "setReferrer", "code": "..."}
+     *
+     * Acts on the master account: a configured vault/subaccount is not signed
+     * over and is not sent. See the note on createSubAccount().
+     *
+     * @param code Referral code to be referred by. Must be non-empty.
+     */
+    nlohmann::json setReferrer(const std::string& code);
+
+    /**
+     * Create a sub-account under this account.
+     *
+     * Wire action: {"type": "createSubAccount", "name": "..."}
+     *
+     * This and the two subAccount*Transfer() methods act on the master
+     * account, so a vault/subaccount configured on this Exchange is neither
+     * signed over nor sent in the envelope. That is a deliberate divergence
+     * from the Python SDK, which signs these with no vault but still puts the
+     * configured vault in the envelope -- a combination the server cannot
+     * verify, since the signature does not cover the vault it is sent with.
+     *
+     * The response carries the new sub-account's address, which is what the
+     * transfer methods below take as sub_account_user.
+     *
+     * @param name Display name for the sub-account. Must be non-empty.
+     */
+    nlohmann::json createSubAccount(const std::string& name);
+
+    /**
+     * Move perp USDC between this account and one of its sub-accounts.
+     *
+     * Wire action:
+     * {"type": "subAccountTransfer", "subAccountUser": "0x...", "isDeposit": bool, "usd": N}
+     *
+     * @param sub_account_user Sub-account address (42-char hex)
+     * @param is_deposit true moves funds master -> sub, false sub -> master
+     * @param usd Amount in micro-USDC (1 USDC = 1000000). Must be positive.
+     */
+    nlohmann::json subAccountTransfer(const std::string& sub_account_user,
+                                     bool is_deposit,
+                                     int64_t usd);
+
+    /**
+     * Move a spot token between this account and one of its sub-accounts.
+     * The spot counterpart of subAccountTransfer().
+     *
+     * Wire action: {"type": "subAccountSpotTransfer", "subAccountUser": "0x...",
+     *               "isDeposit": bool, "token": "...", "amount": "<float string>"}
+     *
+     * @param sub_account_user Sub-account address (42-char hex)
+     * @param is_deposit true moves tokens master -> sub, false sub -> master
+     * @param token Token identifier as "NAME:0x<token id>", e.g. from
+     *              info_.spotMeta(). Must be non-empty.
+     * @param amount Token amount. Throws if it cannot be represented exactly
+     *               at 8 decimal places.
+     */
+    nlohmann::json subAccountSpotTransfer(const std::string& sub_account_user,
+                                         bool is_deposit,
+                                         const std::string& token,
+                                         double amount);
+
+    /**
      * Update leverage for a coin
      */
     nlohmann::json updateLeverage(int leverage,

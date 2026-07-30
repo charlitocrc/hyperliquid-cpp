@@ -46,15 +46,6 @@ static void packJsonImpl(msgpack::packer<std::stringstream>& packer, const JsonT
     }
 }
 
-// Wrapper functions for different JSON types
-static void packJson(msgpack::packer<std::stringstream>& packer, const nlohmann::json& j) {
-    packJsonImpl(packer, j);
-}
-
-static void packJson(msgpack::packer<std::stringstream>& packer, const nlohmann::ordered_json& j) {
-    packJsonImpl(packer, j);
-}
-
 // Wallet implementation
 
 Wallet::Wallet(void* ec_key) : ec_key_(ec_key) {
@@ -89,7 +80,7 @@ std::vector<uint8_t> actionHash(const nlohmann::ordered_json& action,
     // 1. Msgpack serialize the action
     std::stringstream ss;
     msgpack::packer<std::stringstream> packer(ss);
-    packJson(packer, action);
+    packJsonImpl(packer, action);
     std::string msgpack_str = ss.str();
     data.insert(data.end(), msgpack_str.begin(), msgpack_str.end());
 
