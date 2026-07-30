@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Options
 option(BUILD_EXAMPLES "Build example programs" ON)
 option(BUILD_TESTS "Build tests" OFF)
+option(BUILD_BENCH "Build benchmarks" OFF)
 option(BUILD_WEBSOCKET "Build WebSocket support (fetches IXWebSocket)" ON)
 
 # Find dependencies
@@ -129,6 +130,11 @@ endif()
 if(BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+# Benchmarks
+if(BUILD_BENCH)
+    add_subdirectory(bench)
 endif()
 
 # Install rules

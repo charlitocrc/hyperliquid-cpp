@@ -8,17 +8,18 @@ docs (Info / Exchange / WebSocket endpoints) and cross-checked against the reque
 
 **Implemented today** (verified against source, not aspiration):
 
-- Info (37 request types): `allMids`, `clearinghouseState`, `spotClearinghouseState`, `openOrders`,
+- Info (42 request types): `allMids`, `clearinghouseState`, `spotClearinghouseState`, `openOrders`,
   `frontendOpenOrders`, `historicalOrders`, `orderStatus`, `l2Book`, `candleSnapshot`, `meta`,
   `metaAndAssetCtxs`, `spotMeta`, `spotMetaAndAssetCtxs`, `perpDexs`, `perpDeployAuctionStatus`,
   `userFills`, `userFillsByTime`, `userFunding`, `fundingHistory`, `userNonFundingLedgerUpdates`,
   `userFees`, `userRole`, `userRateLimit`, `userTwapSliceFills`, `userVaultEquities`, `vaultDetails`,
   `subAccounts`, `referral`, `portfolio`, `maxBuilderFee`, `approvedBuilders`, `userDexAbstraction`,
-  `userAbstraction`, `perpDexLimits`, `perpDexStatus`, `tokenDetails`
-- Exchange (22 actions): `order`, `cancel`, `cancelByCloid`, `modify`, `batchModify`, `scheduleCancel`,
+  `userAbstraction`, `perpDexLimits`, `perpDexStatus`, `tokenDetails`, `predictedFundings`,
+  `perpsAtOpenInterestCap`, `perpCategories`, `perpConciseAnnotations`, `perpAnnotation`
+- Exchange (23 actions): `order`, `cancel`, `cancelByCloid`, `modify`, `batchModify`, `scheduleCancel`,
   `updateLeverage`, `updateIsolatedMargin`, `topUpIsolatedOnlyMargin`, `usdSend`, `spotSend`,
   `usdClassTransfer`, `sendAsset`, `twapOrder`, `twapCancel`, `reserveRequestWeight`,
-  `approveBuilderFee`, `approveAgent`, `setReferrer`, `createSubAccount`, `subAccountTransfer`,
+  `approveBuilderFee`, `approveAgent`, `noop`, `setReferrer`, `createSubAccount`, `subAccountTransfer`,
   `subAccountSpotTransfer`
 - Market orders (`marketOpen` / `marketClose`), EIP-712 signing, ECDSA secp256k1 wallet,
   automatic tick/lot rounding, `setExpiresAfter`
@@ -305,7 +306,10 @@ server cannot verify it — we omit it from both instead. Shared with
 
 ### Misc
 
-- [ ] `noop()` - action `noop`; invalidates a pending nonce
+- [x] `noop()` - action `noop`; invalidates a pending nonce. The only action taking a
+      caller-supplied nonce (`postL1Action` grew an optional override for it); defaults to a
+      generated timestamp, unlike Python where the nonce is required. Signs the configured
+      vault like any ordinary L1 action. Covered in `tests/l1_action_signing_test.cpp`.
 - [ ] `useBigBlocks()` - big-blocks mode
 - [ ] `gossipPriorityBid()` - Python SDK action, no public doc page
 
@@ -315,17 +319,36 @@ server cannot verify it — we omit it from both instead. Shared with
 
 ### Perps (newly surfaced by docs, never tracked here)
 
-- [ ] `predictedFundings()` - `predictedFundings`; funding across venues (first perp dex only)
-- [ ] `perpsAtOpenInterestCap()` - `perpsAtOpenInterestCap`
-- [ ] `allPerpMetas()` - `allPerpMetas`; meta + ctxs for every dex in one call
+- [x] `predictedFundings()` - `predictedFundings`; funding across venues (first perp dex only,
+      no dex parameter). Returns `[[coin, [[venue, {fundingRate, nextFundingTime,
+      fundingIntervalHours}], ...]], ...]`. Rates are NOT comparable across venues without
+      scaling by `fundingIntervalHours` — Hyperliquid is hourly, Binance/Bybit 4- or 8-hourly.
+- [x] `perpsAtOpenInterestCap()` - `perpsAtOpenInterestCap`; array of coin names. Takes an
+      optional `dex`, omitted when empty (the `meta()` convention, and the API treats `""` and
+      absent identically here).
 - [x] `perpDexLimits()` - `perpDexLimits`; OI caps and transfer limits for a builder dex.
       `""` is rejected rather than meaning the default dex, so the SDK throws before
       spending a request.
 - [x] `perpDexStatus()` - `perpDexStatus`; total net deposit for a dex. Here `""` IS
       meaningful (first perp dex) and is always sent.
-- [ ] `perpAnnotation()` - `perpAnnotation`; category/description for a coin
-- [ ] `perpCategories()` - `perpCategories`
-- [ ] `perpConciseAnnotations()` - `perpConciseAnnotations`
+- [x] `perpAnnotation()` - `perpAnnotation`; requires `coin`. Returns
+      `{category, description, displayName?, keywords?}`, or **null** when the coin has no
+      annotation. Annotations exist for builder-dex coins (`flx:BTC`, `xyz:TSLA`); plain
+      default-dex coins like `BTC` return null. An empty coin also returns null rather than an
+      error, so the SDK throws on it — otherwise a caller bug is indistinguishable from a real
+      "unannotated" answer.
+- [x] `perpCategories()` - `perpCategories`; `[[coin, category], ...]` across all dexes.
+      Live categories: crypto, stocks, commodities, indices. 162 annotated coins as of writing.
+- [x] `perpConciseAnnotations()` - `perpConciseAnnotations`; `[[coin, {category, displayName?,
+      keywords?}], ...]`. Same coin set as `perpCategories()`, minus the long descriptions.
+
+None of these three are in `hyperliquid_api_docs.md`; request/response shapes above were
+established against live mainnet. All five are covered in
+`tests/info_perp_deployment_queries_test.cpp` and shown in `examples/dex_and_token_info.cpp`.
+
+Still open in this block:
+
+- [ ] `allPerpMetas()` - `allPerpMetas`; meta + ctxs for every dex in one call
 - [ ] `activeAssetData()` - `activeAssetData`; leverage, max trade size, available-to-trade.
       Currently only reachable via WebSocket in the Python SDK; the info endpoint supports it too.
 
@@ -512,7 +535,7 @@ the tier for a given notional. Callers do the lookup themselves.
 | Candles | ✅ | ✅ | Complete |
 | All Mids | ✅ | ✅ | Complete |
 | Funding History | ✅ | ✅ | Complete |
-| Predicted Fundings | ✅ | ❌ | TODO |
+| Predicted Fundings | ✅ | ✅ | Complete |
 | User Fees | ✅ | ✅ | Complete |
 | Portfolio | ✅ | ✅ | Complete |
 | Vault Details | ✅ | ✅ | Complete |

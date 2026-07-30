@@ -16,7 +16,11 @@ Exchange::Exchange(std::shared_ptr<Wallet> wallet,
                   const std::vector<std::string>* perp_dexs,
                   int timeout_ms)
     : API(base_url.empty() ? MAINNET_API_URL : base_url, timeout_ms),
-      info_(base_url, true, meta, spot_meta, perp_dexs, timeout_ms),
+      // Share this Exchange's connection rather than opening a second one to
+      // the same host: base classes are constructed before members, so the
+      // connection already exists. Saves a TLS handshake at startup, and keeps
+      // the info path warm whenever the trading path is used, and vice versa.
+      info_(base_url, true, meta, spot_meta, perp_dexs, timeout_ms, connection()),
       wallet_(wallet),
       vault_address_(vault_address),
       account_address_(account_address),

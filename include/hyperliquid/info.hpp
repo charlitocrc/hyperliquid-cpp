@@ -27,7 +27,8 @@ public:
                  const Meta* meta = nullptr,
                  const SpotMeta* spot_meta = nullptr,
                  const std::vector<std::string>* perp_dexs = nullptr,
-                 int timeout_ms = 30000);
+                 int timeout_ms = 30000,
+                 std::shared_ptr<detail::HttpConnection> connection = nullptr);
 
     // Out of line so the unique_ptr below does not need the full definition of
     // WebSocketManager here.

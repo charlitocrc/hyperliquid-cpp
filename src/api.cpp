@@ -2,10 +2,70 @@
 #include "hyperliquid/errors.hpp"
 #include "hyperliquid/utils/constants.hpp"
 #include <curl/curl.h>
+#include <algorithm>
+#include <mutex>
 #include <stdexcept>
 #include <sstream>
 
 namespace hyperliquid {
+
+namespace detail {
+
+// See api.hpp. Owns the curl handle, the header list it reuses, and the lock
+// that keeps concurrent callers from interleaving transfers on one handle.
+class HttpConnection {
+public:
+    HttpConnection() {
+        handle_ = curl_easy_init();
+        if (!handle_) {
+            throw std::runtime_error("Failed to initialize libcurl");
+        }
+
+        // Built once and kept: every request sends the same headers, and
+        // rebuilding the list per call allocates for no reason.
+        headers_ = curl_slist_append(nullptr, "Content-Type: application/json");
+        curl_easy_setopt(handle_, CURLOPT_HTTPHEADER, headers_);
+
+        // Without this, curl may use signals for timeouts, which is unsafe in a
+        // multi-threaded process. Required for the thread-safety guarantee.
+        curl_easy_setopt(handle_, CURLOPT_NOSIGNAL, 1L);
+
+        // Keep the connection alive across idle gaps. A trading client can sit
+        // quiet between actions, and a load balancer or NAT that drops an idle
+        // connection costs a full TLS handshake (~52ms measured) on the next
+        // request. Probe well before the 60s idle timeouts commonly deployed.
+        curl_easy_setopt(handle_, CURLOPT_TCP_KEEPALIVE, 1L);
+        curl_easy_setopt(handle_, CURLOPT_TCP_KEEPIDLE, 30L);
+        curl_easy_setopt(handle_, CURLOPT_TCP_KEEPINTVL, 15L);
+
+        // Advertise the encodings this build of curl can decode. Metadata
+        // responses (spotMeta, l2Book) are large and compress well; curl
+        // decompresses transparently, so callers see no difference.
+        curl_easy_setopt(handle_, CURLOPT_ACCEPT_ENCODING, "");
+    }
+
+    ~HttpConnection() {
+        if (handle_) {
+            curl_easy_cleanup(handle_);
+        }
+        if (headers_) {
+            curl_slist_free_all(headers_);
+        }
+    }
+
+    HttpConnection(const HttpConnection&) = delete;
+    HttpConnection& operator=(const HttpConnection&) = delete;
+
+    CURL* handle() { return handle_; }
+    std::mutex& mutex() { return mutex_; }
+
+private:
+    CURL* handle_ = nullptr;
+    curl_slist* headers_ = nullptr;
+    std::mutex mutex_;
+};
+
+}  // namespace detail
 
 size_t API::writeCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t total_size = size * nmemb;
@@ -15,29 +75,20 @@ size_t API::writeCallback(void* contents, size_t size, size_t nmemb, void* userp
 }
 
 API::API(const std::string& base_url, int timeout_ms)
+    : API(base_url, timeout_ms, nullptr) {
+}
+
+API::API(const std::string& base_url,
+         int timeout_ms,
+         std::shared_ptr<detail::HttpConnection> connection)
     : base_url_(base_url.empty() ? MAINNET_API_URL : base_url),
       timeout_ms_(timeout_ms),
-      curl_handle_(nullptr) {
-    initCurl();
+      connection_(connection ? std::move(connection)
+                             : std::make_shared<detail::HttpConnection>()) {
 }
 
-API::~API() {
-    cleanupCurl();
-}
-
-void API::initCurl() {
-    curl_handle_ = curl_easy_init();
-    if (!curl_handle_) {
-        throw std::runtime_error("Failed to initialize libcurl");
-    }
-}
-
-void API::cleanupCurl() {
-    if (curl_handle_) {
-        curl_easy_cleanup(static_cast<CURL*>(curl_handle_));
-        curl_handle_ = nullptr;
-    }
-}
+// Out of line so HttpConnection only has to be complete here.
+API::~API() = default;
 
 void API::handleException(long response_code, const std::string& response_body) {
     if (response_code >= 200 && response_code < 300) {
@@ -70,36 +121,30 @@ void API::handleException(long response_code, const std::string& response_body) 
 }
 
 nlohmann::json API::post(const std::string& url_path, const nlohmann::json& payload) {
-    CURL* curl = static_cast<CURL*>(curl_handle_);
+    const std::string url = base_url_ + url_path;
+    const std::string json_str = payload.dump();
     std::string response_body;
 
-    std::string url = base_url_ + url_path;
-    std::string json_str = payload.dump();
+    // Held for the whole exchange, not just the perform: the per-request
+    // options below live on the shared handle, so another thread setting its
+    // own URL between our setopt and our perform would send our body to its
+    // endpoint.
+    std::lock_guard<std::mutex> lock(connection_->mutex());
+    CURL* curl = connection_->handle();
 
-    // Set URL
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-
-    // Set POST data
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_str.c_str());
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, json_str.length());
-
-    // Set write callback
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(json_str.length()));
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_body);
-
-    // Set timeout
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(timeout_ms_));
 
-    // Set headers
-    struct curl_slist* headers = nullptr;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    // curl defaults to a 300s connect timeout, which turns an unreachable host
+    // into a hang. Cap it, but never above the caller's overall timeout.
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS,
+                     static_cast<long>(std::min(timeout_ms_, 10000)));
 
-    // Perform request
-    CURLcode res = curl_easy_perform(curl);
-
-    // Clean up headers
-    curl_slist_free_all(headers);
+    const CURLcode res = curl_easy_perform(curl);
 
     if (res != CURLE_OK) {
         std::string error_msg = "HTTP request failed: ";
