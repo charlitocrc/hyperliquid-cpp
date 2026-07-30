@@ -222,104 +222,6 @@ BIGNUM* generateDeterministicK(const BIGNUM* priv_key, const std::vector<uint8_t
     return k;
 }
 
-int calculateRecoveryId(const EC_KEY* ec_key,
-                       const std::vector<uint8_t>& hash,
-                       const ECDSA_SIG* sig) {
-    const EC_GROUP* group = EC_KEY_get0_group(ec_key);
-    const EC_POINT* pub_key = EC_KEY_get0_public_key(ec_key);
-
-    const BIGNUM *r, *s;
-    ECDSA_SIG_get0(sig, &r, &s);
-
-    // Get the order of the curve
-    BIGNUM* order = BN_new();
-    EC_GROUP_get_order(group, order, nullptr);
-
-    // Get curve parameters
-    BIGNUM* p = BN_new();
-    EC_GROUP_get_curve(group, p, nullptr, nullptr, nullptr);
-
-    BN_CTX* ctx = BN_CTX_new();
-
-    // Try both recovery IDs (0 and 1)
-    for (int recovery_id = 0; recovery_id < 2; ++recovery_id) {
-        // Calculate x coordinate of R (which is r)
-        BIGNUM* x = BN_dup(r);
-
-        // Calculate y from x
-        // y^2 = x^3 + 7 (for secp256k1)
-        BIGNUM* y_squared = BN_new();
-        BIGNUM* y = BN_new();
-        BIGNUM* tmp = BN_new();
-
-        // y_squared = x^3
-        BN_mod_mul(tmp, x, x, p, ctx);
-        BN_mod_mul(y_squared, tmp, x, p, ctx);
-
-        // y_squared = x^3 + 7
-        BN_add_word(y_squared, 7);
-        BN_mod(y_squared, y_squared, p, ctx);
-
-        // y = sqrt(y_squared) mod p
-        BN_mod_sqrt(y, y_squared, p, ctx);
-
-        // Choose y based on recovery_id (odd/even)
-        if ((BN_is_odd(y) ? 1 : 0) != recovery_id) {
-            BN_sub(y, p, y);
-        }
-
-        // Create point R = (x, y)
-        EC_POINT* R = EC_POINT_new(group);
-        EC_POINT_set_affine_coordinates(group, R, x, y, ctx);
-
-        // Recover public key: Q = r^-1 * (s*R - e*G)
-        BIGNUM* r_inv = BN_new();
-        BN_mod_inverse(r_inv, r, order, ctx);
-
-        BIGNUM* e = BN_bin2bn(hash.data(), hash.size(), nullptr);
-
-        EC_POINT* sR = EC_POINT_new(group);
-        EC_POINT_mul(group, sR, nullptr, R, s, ctx);
-
-        EC_POINT* eG = EC_POINT_new(group);
-        EC_POINT_mul(group, eG, e, nullptr, nullptr, ctx);
-
-        EC_POINT* Q = EC_POINT_new(group);
-        EC_POINT_invert(group, eG, ctx);
-        EC_POINT_add(group, Q, sR, eG, ctx);
-        EC_POINT_mul(group, Q, nullptr, Q, r_inv, ctx);
-
-        // Compare recovered public key with actual public key
-        int match = (EC_POINT_cmp(group, Q, pub_key, ctx) == 0);
-
-        // Cleanup
-        EC_POINT_free(R);
-        EC_POINT_free(sR);
-        EC_POINT_free(eG);
-        EC_POINT_free(Q);
-        BN_free(x);
-        BN_free(y);
-        BN_free(y_squared);
-        BN_free(tmp);
-        BN_free(r_inv);
-        BN_free(e);
-
-        if (match) {
-            BN_free(order);
-            BN_free(p);
-            BN_CTX_free(ctx);
-            return recovery_id;
-        }
-    }
-
-    BN_free(order);
-    BN_free(p);
-    BN_CTX_free(ctx);
-
-    // Default to 0 if recovery fails
-    return 0;
-}
-
 Signature signHash(const void* ec_key_ptr, const std::vector<uint8_t>& hash) {
     EC_KEY* ec_key = static_cast<EC_KEY*>(const_cast<void*>(ec_key_ptr));
 
@@ -346,10 +248,27 @@ Signature signHash(const void* ec_key_ptr, const std::vector<uint8_t>& hash) {
     EC_POINT* kG = EC_POINT_new(group);
     EC_POINT_mul(group, kG, k, nullptr, nullptr, ctx);
 
-    BIGNUM* r = BN_new();
+    BIGNUM* x_coord = BN_new();
     BIGNUM* y_coord = BN_new();
-    EC_POINT_get_affine_coordinates(group, kG, r, y_coord, ctx);
-    BN_mod(r, r, order, ctx);
+    EC_POINT_get_affine_coordinates(group, kG, x_coord, y_coord, ctx);
+
+    // The recovery id is a property of the point kG, which we have right here,
+    // so read it off directly rather than recovering the public key to find it.
+    //
+    //   bit 0 = parity of kG.y
+    //   bit 1 = whether kG.x had to be reduced mod order
+    //
+    // Bit 1 needs the comparison before the reduction below. It is only
+    // reachable when kG.x lands in [order, p), which on secp256k1 has
+    // probability ~2^-128 -- but the check is two instructions, and a wrong
+    // recovery id means the signature attributes to the wrong address.
+    int recovery_id = (BN_cmp(x_coord, order) >= 0) ? 2 : 0;
+    if (BN_is_odd(y_coord)) {
+        recovery_id |= 1;
+    }
+
+    BIGNUM* r = BN_new();
+    BN_mod(r, x_coord, order, ctx);
 
     // Calculate s = k^-1 * (hash + r * priv_key) mod order
     BIGNUM* k_inv = BN_new();
@@ -363,31 +282,26 @@ Signature signHash(const void* ec_key_ptr, const std::vector<uint8_t>& hash) {
     BN_mod_add(tmp, e, tmp, order, ctx);        // hash + r * priv_key
     BN_mod_mul(s, k_inv, tmp, order, ctx);      // k^-1 * (hash + r * priv_key)
 
-    // Ensure s is in the lower half (ETH requirement for non-malleability)
+    // Ensure s is in the lower half (ETH requirement for non-malleability).
+    // Replacing s with order - s mirrors R over the x-axis, flipping the y
+    // parity the recovery id encodes, so bit 0 has to flip with it.
     BIGNUM* half_order = BN_new();
     BN_rshift1(half_order, order);
     if (BN_cmp(s, half_order) > 0) {
         BN_sub(s, order, s);
+        recovery_id ^= 1;
     }
 
-    // Create signature
-    ECDSA_SIG* sig = ECDSA_SIG_new();
-    ECDSA_SIG_set0(sig, BN_dup(r), BN_dup(s));
-
-    // Convert to hex strings
     Signature result;
     result.r = "0x" + bnToHex(r, 32);
     result.s = "0x" + bnToHex(s, 32);
-
-    // Calculate recovery ID (v)
-    int recovery_id = calculateRecoveryId(ec_key, hash, sig);
     result.v = recovery_id + 27;  // Ethereum uses 27/28
 
     // Cleanup
-    ECDSA_SIG_free(sig);
     EC_POINT_free(kG);
     BN_free(k);
     BN_free(order);
+    BN_free(x_coord);
     BN_free(r);
     BN_free(s);
     BN_free(y_coord);

@@ -269,6 +269,52 @@ void vaultAndExpiresAfterTogether() {
     assertSignedCorrectly(exchange, action, TEST_VAULT, 1800000000000);
 }
 
+// Exact (r, s, v) output for fixed hashes, captured BEFORE the recovery-id
+// optimization replaced calculateRecoveryId()'s brute-force public-key recovery
+// with a direct read of kG's y-parity.
+//
+// The rest of this file recomputes signatures with the same code it is checking,
+// so it cannot catch a change in signing output -- both sides would move
+// together. These vectors are the only thing pinning v, and v is what decides
+// which address the exchange attributes an order to.
+//
+// Two of each parity: v=28 exercises the low-s negation path that flips the
+// recovery id, v=27 does not.
+void signatureVectorsAreStable() {
+    struct Vector {
+        uint8_t counter;  // written into the last byte of an otherwise-zero hash
+        const char* r;
+        const char* s;
+        int v;
+    };
+
+    // clang-format off
+    static const Vector vectors[] = {
+        {0, "0x615a373bb368a656e667bbe6766b8f546f87698567af8c51c2080c7d1b62e868",
+            "0x5f14b74c1fccfaea8c1b229e8f437c64a06fad53e4abaf92cc1f6b7391d93ab5", 28},
+        {1, "0x09196c9b3816d85e856b124ecd4736a6b09bb968bbe084db1ac86cf5ab37d94b",
+            "0x3d5cf1759aff01bd204197ca059e5ad5abb16344bac6fd4b964ea266025b6eac", 27},
+        {2, "0x7f27ca3db8056788dcf67186cdf62b13d6d40ac6529c1eb90b9259d5c7e34e0b",
+            "0x2cde2a23b7f0481d24ddf3a2a65d4d04f33745d73506834270481dac19f61efb", 28},
+        {3, "0x77369e545b9b9b1082e4883eb21889db3b868bc5066b17fc9ed3443cc5999ad9",
+            "0x3256c0910bd2d06e7cff611abef1e44ae58d507100dab4dbcdacd34e4278bf33", 27},
+    };
+    // clang-format on
+
+    auto wallet = Wallet::fromPrivateKey(TEST_PRIVATE_KEY);
+
+    for (const auto& expected : vectors) {
+        std::vector<uint8_t> hash(32, 0);
+        hash[31] = expected.counter;
+
+        const Signature actual = wallet->signMessage(hash);
+
+        assert(actual.r == expected.r);
+        assert(actual.s == expected.s);
+        assert(actual.v == expected.v);
+    }
+}
+
 // noop() is the only action that takes a caller-supplied nonce, which is the
 // entire point of it: it burns the nonce of an order still in flight. If the
 // override were dropped, postL1Action would substitute a fresh timestamp and
@@ -424,6 +470,7 @@ void signatureComponentsAreFixedWidth() {
 
 int main() {
     signatureComponentsAreFixedWidth();
+    signatureVectorsAreStable();
     noopUsesSuppliedNonce();
     noopWithoutNonceGeneratesOne();
     setReferrerIgnoresConfiguredVault();
