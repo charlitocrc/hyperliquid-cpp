@@ -269,6 +269,47 @@ void vaultAndExpiresAfterTogether() {
     assertSignedCorrectly(exchange, action, TEST_VAULT, 1800000000000);
 }
 
+// noop() is the only action that takes a caller-supplied nonce, which is the
+// entire point of it: it burns the nonce of an order still in flight. If the
+// override were dropped, postL1Action would substitute a fresh timestamp and
+// the call would silently stop racing the order it was aimed at.
+//
+// assertSignedCorrectly recomputes from whatever nonce the payload carries, so
+// it alone cannot catch that -- hence the exact-value assert here.
+void noopUsesSuppliedNonce() {
+    TestExchange exchange(TEST_VAULT);
+
+    const int64_t target_nonce = 1700000000000;
+    exchange.noop(target_nonce);
+
+    assert(exchange.lastRequest().payload.at("nonce").get<int64_t>() == target_nonce);
+
+    nlohmann::ordered_json action;
+    action["type"] = "noop";
+
+    // Unlike the subAccount* actions, noop is an ordinary L1 action: a
+    // configured vault is signed over and sent.
+    assertSignedCorrectly(exchange, action, TEST_VAULT, std::nullopt);
+}
+
+// With no argument it falls back to a generated timestamp, so it is usable as
+// a plain nonce burn.
+void noopWithoutNonceGeneratesOne() {
+    TestExchange exchange;
+
+    exchange.noop();
+
+    // Milliseconds since epoch, so comfortably past this bound and nowhere
+    // near the sentinel the explicit-nonce case uses.
+    const int64_t nonce = exchange.lastRequest().payload.at("nonce").get<int64_t>();
+    assert(nonce > 1700000000000);
+
+    nlohmann::ordered_json action;
+    action["type"] = "noop";
+
+    assertSignedCorrectly(exchange, action, "", std::nullopt);
+}
+
 // setReferrer and the subAccount* actions act on the master account. Each is
 // driven from an Exchange that HAS a vault configured, but asserted against a
 // signature recomputed with no vault -- so if postL1Action ever starts signing
@@ -383,6 +424,8 @@ void signatureComponentsAreFixedWidth() {
 
 int main() {
     signatureComponentsAreFixedWidth();
+    noopUsesSuppliedNonce();
+    noopWithoutNonceGeneratesOne();
     setReferrerIgnoresConfiguredVault();
     createSubAccountIgnoresConfiguredVault();
     subAccountTransferIgnoresConfiguredVault();

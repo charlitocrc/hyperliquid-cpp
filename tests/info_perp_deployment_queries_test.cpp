@@ -125,6 +125,78 @@ void queryPerpDeployAuctionStatusUsesExpectedPayload() {
     assertSingleRequest(info, {{"type", "perpDeployAuctionStatus"}});
 }
 
+void predictedFundingsUsesExpectedPayload() {
+    TestInfo info;
+
+    const auto response = info.predictedFundings();
+
+    assert(response == nlohmann::json({{"ok", true}, {"source", "mock"}}));
+    assertSingleRequest(info, {{"type", "predictedFundings"}});
+}
+
+// Follows the meta()/metaAndAssetCtxs() convention: an empty dex is omitted
+// rather than sent as "", which the API treats identically.
+void perpsAtOpenInterestCapOmitsEmptyDex() {
+    TestInfo info;
+
+    const auto response = info.perpsAtOpenInterestCap();
+
+    assert(response == nlohmann::json({{"ok", true}, {"source", "mock"}}));
+    assertSingleRequest(info, {{"type", "perpsAtOpenInterestCap"}});
+}
+
+void perpsAtOpenInterestCapIncludesDexWhenProvided() {
+    TestInfo info;
+
+    const auto response = info.perpsAtOpenInterestCap("xyz");
+
+    assert(response == nlohmann::json({{"ok", true}, {"source", "mock"}}));
+    assertSingleRequest(info, {{"type", "perpsAtOpenInterestCap"}, {"dex", "xyz"}});
+}
+
+void perpCategoriesUsesExpectedPayload() {
+    TestInfo info;
+
+    const auto response = info.perpCategories();
+
+    assert(response == nlohmann::json({{"ok", true}, {"source", "mock"}}));
+    assertSingleRequest(info, {{"type", "perpCategories"}});
+}
+
+void perpConciseAnnotationsUsesExpectedPayload() {
+    TestInfo info;
+
+    const auto response = info.perpConciseAnnotations();
+
+    assert(response == nlohmann::json({{"ok", true}, {"source", "mock"}}));
+    assertSingleRequest(info, {{"type", "perpConciseAnnotations"}});
+}
+
+void perpAnnotationUsesExpectedPayload() {
+    TestInfo info;
+
+    const auto response = info.perpAnnotation("xyz:TSLA");
+
+    assert(response == nlohmann::json({{"ok", true}, {"source", "mock"}}));
+    assertSingleRequest(info, {{"type", "perpAnnotation"}, {"coin", "xyz:TSLA"}});
+}
+
+// An empty coin comes back as null, which is exactly what an unannotated coin
+// returns, so the mistake would otherwise look like a legitimate answer.
+void perpAnnotationRejectsEmptyCoin() {
+    TestInfo info;
+
+    bool threw = false;
+    try {
+        info.perpAnnotation("");
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+
+    assert(threw);
+    assert(info.requests().empty());
+}
+
 void perpDexLimitsUsesExpectedPayload() {
     TestInfo info;
 
@@ -270,6 +342,13 @@ void metaWithoutMarginTablesParses() {
 } // namespace
 
 int main() {
+    predictedFundingsUsesExpectedPayload();
+    perpsAtOpenInterestCapOmitsEmptyDex();
+    perpsAtOpenInterestCapIncludesDexWhenProvided();
+    perpCategoriesUsesExpectedPayload();
+    perpConciseAnnotationsUsesExpectedPayload();
+    perpAnnotationUsesExpectedPayload();
+    perpAnnotationRejectsEmptyCoin();
     perpDexLimitsUsesExpectedPayload();
     perpDexLimitsRejectsEmptyDex();
     perpDexStatusSendsEmptyDexForFirstDex();

@@ -433,6 +433,51 @@ nlohmann::json Info::userFees(const std::string& user) {
     return post("/info", payload);
 }
 
+nlohmann::json Info::predictedFundings() {
+    nlohmann::json payload = {
+        {"type", "predictedFundings"}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::perpsAtOpenInterestCap(const std::string& dex) {
+    nlohmann::json payload = {
+        {"type", "perpsAtOpenInterestCap"}
+    };
+    if (!dex.empty()) {
+        payload["dex"] = dex;
+    }
+    return post("/info", payload);
+}
+
+nlohmann::json Info::perpCategories() {
+    nlohmann::json payload = {
+        {"type", "perpCategories"}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::perpConciseAnnotations() {
+    nlohmann::json payload = {
+        {"type", "perpConciseAnnotations"}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::perpAnnotation(const std::string& coin) {
+    // The API answers an empty coin with null rather than an error, which is
+    // indistinguishable from "this coin has no annotation".
+    if (coin.empty()) {
+        throw std::invalid_argument("perpAnnotation requires a coin name");
+    }
+
+    nlohmann::json payload = {
+        {"type", "perpAnnotation"},
+        {"coin", coin}
+    };
+    return post("/info", payload);
+}
+
 nlohmann::json Info::perpDexLimits(const std::string& dex) {
     // Unlike most dex parameters, "" is not a shorthand for the default dex
     // here -- the default dex has no builder limits, and the API rejects it.

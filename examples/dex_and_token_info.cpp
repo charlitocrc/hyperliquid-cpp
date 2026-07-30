@@ -69,6 +69,49 @@ int main() {
             }
         }
 
+        // Funding across venues, for the first perp dex only. A raw rate is
+        // not comparable between venues without scaling by the interval.
+        std::cout << "\n=== predictedFundings (first 2 coins) ===\n";
+        auto fundings = info.predictedFundings();
+        for (size_t i = 0; i < 2 && i < fundings.size(); ++i) {
+            std::cout << "  " << fundings[i][0].get<std::string>() << ":\n";
+            for (const auto& venue : fundings[i][1]) {
+                std::cout << "    " << venue[0].get<std::string>()
+                          << "  rate=" << venue[1].value("fundingRate", "?")
+                          << "  every " << venue[1].value("fundingIntervalHours", 0) << "h\n";
+            }
+        }
+
+        std::cout << "\n=== perpsAtOpenInterestCap ===\n";
+        auto capped = info.perpsAtOpenInterestCap();
+        std::cout << "  default dex: " << capped.size() << " capped -> " << capped.dump() << "\n";
+        std::cout << "  " << dex << ": " << info.perpsAtOpenInterestCap(dex).dump() << "\n";
+
+        std::cout << "\n=== perpCategories / perpConciseAnnotations ===\n";
+        auto categories = info.perpCategories();
+        std::cout << "  annotated coins: " << categories.size() << "\n";
+        for (size_t i = 0; i < 3 && i < categories.size(); ++i) {
+            std::cout << "    " << categories[i][0].get<std::string>()
+                      << " -> " << categories[i][1].get<std::string>() << "\n";
+        }
+        auto concise = info.perpConciseAnnotations();
+        std::cout << "  concise entries: " << concise.size()
+                  << " (same coins, plus displayName/keywords where set)\n";
+
+        // Full annotation for one coin. Plain default-dex coins such as "BTC"
+        // have none and come back null.
+        std::cout << "\n=== perpAnnotation ===\n";
+        for (const std::string coin : {"xyz:TSLA", "BTC"}) {
+            auto annotation = info.perpAnnotation(coin);
+            std::cout << "  " << coin << ": ";
+            if (annotation.is_null()) {
+                std::cout << "(no annotation)\n";
+            } else {
+                std::cout << annotation.value("category", "?") << " -- "
+                          << annotation.value("description", "").substr(0, 60) << "...\n";
+            }
+        }
+
         // PURR's onchain token id, as listed in info.spotMeta().tokens.
         std::cout << "\n=== tokenDetails(PURR) ===\n";
         auto token = info.tokenDetails("0xc1fb593aeffbeb02f85e0308e9956a90");

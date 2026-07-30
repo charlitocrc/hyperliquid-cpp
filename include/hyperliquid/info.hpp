@@ -307,6 +307,24 @@ public:
                                   std::optional<int64_t> end_time = std::nullopt);
 
     /**
+     * Upcoming funding rates for each coin across venues, for comparing
+     * Hyperliquid's rate against other exchanges.
+     *
+     * Covers the first perp dex only, and takes no dex parameter.
+     *
+     * Note the differing intervals: a raw rate is not comparable across venues
+     * without scaling by fundingIntervalHours (Hyperliquid is hourly, most
+     * others are 8-hourly, some 4).
+     *
+     * @return [[coin, [[venue, {fundingRate: float string,
+     *                          nextFundingTime: int millis,
+     *                          fundingIntervalHours: int}], ...]], ...]
+     *         Venue names are e.g. "HlPerp", "BinPerp", "BybitPerp". A venue
+     *         that does not list the coin is omitted rather than null.
+     */
+    nlohmann::json predictedFundings();
+
+    /**
      * Retrieve a user's funding payment history
      *
      * @param user Address in 42-character hexadecimal format
@@ -552,6 +570,52 @@ public:
      *          assetToStreamingOiCap, assetToFundingMultiplier}
      */
     nlohmann::json perpDexs();
+
+    /**
+     * Coins currently at their open-interest cap. New positions that would
+     * increase open interest are rejected for these, so this is worth checking
+     * before an order fails.
+     *
+     * @param dex Perp dex name. Empty (the default) means the default dex.
+     * @return Array of coin names, e.g. ["CANTO", "JELLY"]. Empty when nothing
+     *         is capped.
+     */
+    nlohmann::json perpsAtOpenInterestCap(const std::string& dex = "");
+
+    /**
+     * Category for every annotated coin, across all dexes.
+     *
+     * @return [[coin, category], ...] — e.g. [["flx:BTC", "crypto"],
+     *         ["xyz:TSLA", "stocks"]]. Categories seen live include "crypto",
+     *         "stocks", "commodities", "indices". Only annotated coins appear;
+     *         plain default-dex coins like "BTC" are absent.
+     */
+    nlohmann::json perpCategories();
+
+    /**
+     * Annotations for every annotated coin, without the long descriptions.
+     * The bulk counterpart to perpAnnotation().
+     *
+     * @return [[coin, {category: str,
+     *                  displayName: str,        // optional
+     *                  keywords: [str, ...]}],  // optional
+     *          ...]
+     *         Same coin set as perpCategories(). Use perpAnnotation() for a
+     *         single coin's full description.
+     */
+    nlohmann::json perpConciseAnnotations();
+
+    /**
+     * Category and prose description for one coin.
+     *
+     * @param coin Coin name, usually dex-prefixed, e.g. "flx:BTC" or
+     *             "xyz:TSLA". Must be non-empty.
+     * @return {category: str, description: str, displayName: str (optional),
+     *          keywords: [str, ...] (optional)}, or null when the coin has no
+     *         annotation. Plain default-dex coins such as "BTC" return null;
+     *         annotations exist for builder-dex coins.
+     */
+    nlohmann::json perpAnnotation(const std::string& coin);
 
     /**
      * Retrieve perp deploy auction status

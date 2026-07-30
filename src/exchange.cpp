@@ -67,8 +67,9 @@ nlohmann::json Exchange::postAction(const nlohmann::json& action,
     return post("/exchange", payload);
 }
 
-nlohmann::json Exchange::postL1Action(const nlohmann::ordered_json& action) {
-    const int64_t nonce = getTimestampMs();
+nlohmann::json Exchange::postL1Action(const nlohmann::ordered_json& action,
+                                      std::optional<int64_t> nonce_override) {
+    const int64_t nonce = nonce_override.value_or(getTimestampMs());
 
     std::optional<std::string> vault_opt;
     if (!vault_address_.empty() && !actionIgnoresVault(action["type"])) {
@@ -648,6 +649,13 @@ nlohmann::json Exchange::subAccountSpotTransfer(const std::string& sub_account_u
     action["amount"] = floatToWire(amount);
 
     return postL1Action(action);
+}
+
+nlohmann::json Exchange::noop(std::optional<int64_t> nonce) {
+    nlohmann::ordered_json action;
+    action["type"] = "noop";
+
+    return postL1Action(action, nonce);
 }
 
 nlohmann::json Exchange::reserveRequestWeight(int64_t weight) {

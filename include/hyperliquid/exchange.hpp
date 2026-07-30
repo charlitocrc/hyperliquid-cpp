@@ -359,6 +359,22 @@ public:
     nlohmann::json reserveRequestWeight(int64_t weight);
 
     /**
+     * Do nothing, but consume a nonce.
+     *
+     * Passing the nonce of an order that is still in flight is a more reliable
+     * way to kill it than cancel(): whichever of the two reaches the exchange
+     * first wins, and the loser is rejected as a duplicate nonce. cancel() can
+     * only act once the order has already rested.
+     *
+     * Wire action: {"type": "noop"}
+     *
+     * @param nonce Nonce to consume. Defaults to the current timestamp, which
+     *              burns a fresh nonce and does nothing else. Pass the target
+     *              order's nonce to race that order.
+     */
+    nlohmann::json noop(std::optional<int64_t> nonce = std::nullopt);
+
+    /**
      * Set expiration time for actions (optional)
      */
     void setExpiresAfter(std::optional<int64_t> expires_after);
@@ -374,8 +390,12 @@ private:
      *
      * Not used by the user-signed actions (usdTransfer, spotTransfer), which
      * sign an EIP-712 payload instead and carry their own nonce.
+     *
+     * @param nonce Overrides the generated timestamp nonce. Only noop() needs
+     *              this, to target a nonce that is already in flight.
      */
-    nlohmann::json postL1Action(const nlohmann::ordered_json& action);
+    nlohmann::json postL1Action(const nlohmann::ordered_json& action,
+                               std::optional<int64_t> nonce = std::nullopt);
 
     nlohmann::json postAction(const nlohmann::json& action,
                              const Signature& signature,
