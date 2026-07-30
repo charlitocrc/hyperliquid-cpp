@@ -8,23 +8,24 @@ docs (Info / Exchange / WebSocket endpoints) and cross-checked against the reque
 
 **Implemented today** (verified against source, not aspiration):
 
-- Info (34 request types): `allMids`, `clearinghouseState`, `spotClearinghouseState`, `openOrders`,
+- Info (37 request types): `allMids`, `clearinghouseState`, `spotClearinghouseState`, `openOrders`,
   `frontendOpenOrders`, `historicalOrders`, `orderStatus`, `l2Book`, `candleSnapshot`, `meta`,
   `metaAndAssetCtxs`, `spotMeta`, `spotMetaAndAssetCtxs`, `perpDexs`, `perpDeployAuctionStatus`,
   `userFills`, `userFillsByTime`, `userFunding`, `fundingHistory`, `userNonFundingLedgerUpdates`,
   `userFees`, `userRole`, `userRateLimit`, `userTwapSliceFills`, `userVaultEquities`, `vaultDetails`,
   `subAccounts`, `referral`, `portfolio`, `maxBuilderFee`, `approvedBuilders`, `userDexAbstraction`,
-  `userAbstraction`
-- Exchange (18 actions): `order`, `cancel`, `cancelByCloid`, `modify`, `batchModify`, `scheduleCancel`,
+  `userAbstraction`, `perpDexLimits`, `perpDexStatus`, `tokenDetails`
+- Exchange (22 actions): `order`, `cancel`, `cancelByCloid`, `modify`, `batchModify`, `scheduleCancel`,
   `updateLeverage`, `updateIsolatedMargin`, `topUpIsolatedOnlyMargin`, `usdSend`, `spotSend`,
   `usdClassTransfer`, `sendAsset`, `twapOrder`, `twapCancel`, `reserveRequestWeight`,
-  `approveBuilderFee`, `approveAgent`
+  `approveBuilderFee`, `approveAgent`, `setReferrer`, `createSubAccount`, `subAccountTransfer`,
+  `subAccountSpotTransfer`
 - Market orders (`marketOpen` / `marketClose`), EIP-712 signing, ECDSA secp256k1 wallet,
   automatic tick/lot rounding, `setExpiresAfter`
-- 4 working examples
+- 20 working examples in `examples/` (one needs BUILD_WEBSOCKET)
 
-**Not implemented at all:** WebSocket (every subscription), TWAP orders, staking, borrow/lend,
-sub-accounts, vaults, agents/referrals, multi-sig, token/perp deployment, prediction-market outcomes.
+**Not implemented at all:** staking, borrow/lend, vaults, multi-sig, token/perp deployment,
+prediction-market outcomes.
 
 ---
 
@@ -317,24 +318,34 @@ server cannot verify it — we omit it from both instead. Shared with
 - [ ] `predictedFundings()` - `predictedFundings`; funding across venues (first perp dex only)
 - [ ] `perpsAtOpenInterestCap()` - `perpsAtOpenInterestCap`
 - [ ] `allPerpMetas()` - `allPerpMetas`; meta + ctxs for every dex in one call
-- [ ] `perpDexLimits()` - `perpDexLimits`; OI caps and transfer limits for a builder dex
-- [ ] `perpDexStatus()` - `perpDexStatus`; total net deposit for a dex
+- [x] `perpDexLimits()` - `perpDexLimits`; OI caps and transfer limits for a builder dex.
+      `""` is rejected rather than meaning the default dex, so the SDK throws before
+      spending a request.
+- [x] `perpDexStatus()` - `perpDexStatus`; total net deposit for a dex. Here `""` IS
+      meaningful (first perp dex) and is always sent.
 - [ ] `perpAnnotation()` - `perpAnnotation`; category/description for a coin
 - [ ] `perpCategories()` - `perpCategories`
 - [ ] `perpConciseAnnotations()` - `perpConciseAnnotations`
 - [ ] `activeAssetData()` - `activeAssetData`; leverage, max trade size, available-to-trade.
       Currently only reachable via WebSocket in the Python SDK; the info endpoint supports it too.
 
-Also note: the `meta` response now carries `marginTables` and per-asset `marginMode`
-(`"strictIsolated"` / `"noCross"`) plus `growthMode`. `onlyIsolated` is deprecated.
-Our `Meta` type does not model any of these.
+- [x] Extend `Meta` / `AssetInfo` with `marginTables`, `marginTableId`, `marginMode`,
+      `growthMode`, `collateralToken`, `isDelisted`. Field set verified against live
+      mainnet `meta` for the default dex and two builder dexes: everything past
+      `name`/`szDecimals` is optional, and `growthMode` (a **string**, e.g. `"enabled"`,
+      not a bool) plus `lastGrowthModeChangeTime` appear only on builder dexes.
+      `onlyIsolated` is deprecated by `marginMode` but still sent, so still parsed.
+      New `MarginTable` / `MarginTier` types; the wire form is `[id, table]` pairs, so
+      the id is folded into `MarginTable::id` during parsing.
+      Covered in `tests/info_perp_deployment_queries_test.cpp`.
 
-- [ ] Extend `Meta` / `AssetInfo` with `marginTables`, `marginTableId`, `marginMode`,
-      `growthMode`, `collateralToken`, `isDelisted`
+Not done: no helper resolves an asset's `margin_table_id` to its `MarginTable`, or picks
+the tier for a given notional. Callers do the lookup themselves.
 
 ### Spot
 
-- [ ] `tokenDetails()` - `tokenDetails`; supply, genesis, deployer, deploy gas
+- [x] `tokenDetails()` - `tokenDetails`; supply, genesis, deployer, deploy gas. Takes the
+      34-char onchain `tokenId` (the `SpotTokenInfo::token_id` field), not a 42-char address.
 - [ ] `spotDeployState()` - `spotDeployState`; spot deploy auction state
 - [ ] `spotPairDeployAuctionStatus()` - `spotPairDeployAuctionStatus`
 
@@ -505,9 +516,9 @@ Our `Meta` type does not model any of these.
 | User Fees | ✅ | ✅ | Complete |
 | Portfolio | ✅ | ✅ | Complete |
 | Vault Details | ✅ | ✅ | Complete |
-| Token Details | ✅ | ❌ | TODO |
-| Perp Dex Limits / Status | ✅ | ❌ | TODO |
-| Margin Tables | ✅ | ❌ | TODO |
+| Token Details | ✅ | ✅ | Complete |
+| Perp Dex Limits / Status | ✅ | ✅ | Complete |
+| Margin Tables | ✅ | ✅ | Complete (parsed into `Meta`; no tier-lookup helper) |
 | Borrow/Lend | ✅ | ❌ | TODO |
 | **Real-Time** |
 | WebSocket (24 subscriptions) | ✅ | ✅ | Complete (raw JSON callbacks; no typed structs) |
@@ -564,10 +575,11 @@ Tests, CI, packaging, docs, cross-platform.
 
 ## Notes
 
-- **Biggest gaps, in order**: staking, borrow/lend, sub-accounts, WS POST requests.
-- **Silent drift to watch**: the docs added `marginTables` / `marginMode` / `growthMode` to `meta`
-  and deprecated `onlyIsolated`. Our `Meta` type ignores all of it, so HIP-3 dex assets are
-  under-modeled today.
+- **Biggest gaps, in order**: staking, borrow/lend, WS POST requests.
+- **Silent drift to watch**: `Meta` is the one API response parsed into a struct rather than
+  returned as raw JSON, so any field the exchange adds is dropped silently. `marginTables` /
+  `marginMode` / `growthMode` / `collateralToken` are modeled now; re-check the field union
+  against a live `meta` when HIP-3 changes land.
 - **`webData2` is retired** — anything targeting it should target `webData3`.
 
 ---

@@ -233,6 +233,28 @@ public:
     nlohmann::json maxBuilderFee(const std::string& user, const std::string& builder);
 
     /**
+     * Open-interest and transfer caps for a builder-deployed (HIP-3) perp dex.
+     *
+     * @param dex Builder dex name, e.g. "xyz". The empty string is NOT allowed
+     *            here (unlike perpDexStatus) and throws.
+     * @return {
+     *           totalOiCap: float string,      // OI cap across the whole dex
+     *           oiSzCapPerPerp: float string,  // per-asset size cap
+     *           maxTransferNtl: float string,  // per-transfer notional cap
+     *           coinToOiCap: [[coin, float string], ...]  // per-coin OI caps
+     *         }
+     */
+    nlohmann::json perpDexLimits(const std::string& dex);
+
+    /**
+     * Total net deposit backing a perp dex.
+     *
+     * @param dex Perp dex name. The empty string means the first perp dex.
+     * @return { totalNetDeposit: float string }
+     */
+    nlohmann::json perpDexStatus(const std::string& dex = "");
+
+    /**
      * Retrieve a user's historical orders (last 2000)
      *
      * @param user Address in 42-character hexadecimal format
@@ -501,6 +523,26 @@ public:
      *              {dayNtlVlm, markPx, midPx, prevDayPx, circulatingSupply, coin}
      */
     nlohmann::json spotMetaAndAssetCtxs();
+
+    /**
+     * Supply, price and deploy information for a single spot token.
+     *
+     * @param token_id Onchain token id in 34-character hex format, e.g.
+     *                 "0xc1fb593aeffbeb02f85e0308e9956a90". This is the
+     *                 tokenId field of SpotTokenInfo, not a 42-char address.
+     * @return {
+     *           name: str,
+     *           maxSupply / totalSupply / circulatingSupply: float string,
+     *           szDecimals: int, weiDecimals: int,
+     *           midPx / markPx / prevDayPx: float string,
+     *           genesis: object | null,      // null for non-HIP-1 tokens
+     *           deployer: str | null,
+     *           deployGas: float string, deployTime: str | null,
+     *           seededUsdc: float string, futureEmissions: float string,
+     *           nonCirculatingUserBalances: [[address, float string], ...]
+     *         }
+     */
+    nlohmann::json tokenDetails(const std::string& token_id);
 
     /**
      * Retrieve all perpetual dexes

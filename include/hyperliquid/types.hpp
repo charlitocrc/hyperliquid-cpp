@@ -152,11 +152,48 @@ struct TwapWire {
 };
 
 /**
- * Asset information
+ * One rung of a margin table: above `lower_bound` notional, an asset's
+ * leverage is capped at `max_leverage`. Tiers are listed ascending, and the
+ * first always has lower_bound "0.0".
+ */
+struct MarginTier {
+    std::string lower_bound;  // decimal string, e.g. "3000000.0"
+    int max_leverage = 0;
+};
+
+/**
+ * A leverage schedule shared by assets that reference it via
+ * AssetInfo::margin_table_id. A single-tier table is a flat leverage cap.
+ */
+struct MarginTable {
+    int id = 0;
+    std::string description;  // e.g. "tiered 10x"; often empty
+    std::vector<MarginTier> margin_tiers;
+};
+
+/**
+ * Asset information.
+ *
+ * Only name and sz_decimals are always present; the rest are absent on some
+ * dexes, so they carry defaults (or nullopt) rather than throwing. The
+ * growth_mode fields appear only on builder-deployed (HIP-3) dexes.
  */
 struct AssetInfo {
     std::string name;
-    int sz_decimals;
+    int sz_decimals = 0;
+    int max_leverage = 0;
+    // Indexes into Meta::margin_tables. nullopt means the dex did not report
+    // one, in which case max_leverage is the whole story.
+    std::optional<int> margin_table_id;
+    // "strictIsolated" (margin cannot be withdrawn from an open position) or
+    // "noCross" (isolated margin only).
+    std::optional<std::string> margin_mode;
+    std::optional<std::string> growth_mode;                     // e.g. "enabled"
+    std::optional<std::string> last_growth_mode_change_time;    // ISO-8601
+    // Deprecated by the API in favour of margin_mode, which distinguishes the
+    // two cases this bool conflates. Still sent, so still parsed.
+    bool only_isolated = false;
+    bool is_delisted = false;
 };
 
 /**
@@ -164,6 +201,9 @@ struct AssetInfo {
  */
 struct Meta {
     std::vector<AssetInfo> universe;
+    std::vector<MarginTable> margin_tables;
+    // Token index of the dex's collateral (0 = USDC on the default dex).
+    int collateral_token = 0;
 };
 
 /**

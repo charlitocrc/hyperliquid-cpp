@@ -294,8 +294,45 @@ Meta Info::meta(const std::string& dex) {
         AssetInfo info;
         info.name = asset["name"];
         info.sz_decimals = asset["szDecimals"];
+        // Everything below is dex-dependent: the default dex omits growthMode,
+        // and delisted/margin-mode fields only appear when they apply.
+        info.max_leverage = asset.value("maxLeverage", 0);
+        info.only_isolated = asset.value("onlyIsolated", false);
+        info.is_delisted = asset.value("isDelisted", false);
+        if (asset.contains("marginTableId")) {
+            info.margin_table_id = asset["marginTableId"].get<int>();
+        }
+        if (asset.contains("marginMode")) {
+            info.margin_mode = asset["marginMode"].get<std::string>();
+        }
+        if (asset.contains("growthMode")) {
+            info.growth_mode = asset["growthMode"].get<std::string>();
+        }
+        if (asset.contains("lastGrowthModeChangeTime")) {
+            info.last_growth_mode_change_time =
+                asset["lastGrowthModeChangeTime"].get<std::string>();
+        }
         result.universe.push_back(info);
     }
+
+    // marginTables is a list of [id, table] pairs, not an object, so the id
+    // lives outside the table body and is folded into MarginTable here.
+    for (const auto& entry : response.value("marginTables", nlohmann::json::array())) {
+        MarginTable table;
+        table.id = entry.at(0).get<int>();
+
+        const auto& body = entry.at(1);
+        table.description = body.value("description", "");
+        for (const auto& tier : body.value("marginTiers", nlohmann::json::array())) {
+            MarginTier margin_tier;
+            margin_tier.lower_bound = tier["lowerBound"];
+            margin_tier.max_leverage = tier["maxLeverage"];
+            table.margin_tiers.push_back(margin_tier);
+        }
+        result.margin_tables.push_back(table);
+    }
+
+    result.collateral_token = response.value("collateralToken", 0);
 
     return result;
 }
@@ -392,6 +429,36 @@ nlohmann::json Info::userFees(const std::string& user) {
     nlohmann::json payload = {
         {"type", "userFees"},
         {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::perpDexLimits(const std::string& dex) {
+    // Unlike most dex parameters, "" is not a shorthand for the default dex
+    // here -- the default dex has no builder limits, and the API rejects it.
+    if (dex.empty()) {
+        throw std::invalid_argument("perpDexLimits requires a builder dex name");
+    }
+
+    nlohmann::json payload = {
+        {"type", "perpDexLimits"},
+        {"dex", dex}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::perpDexStatus(const std::string& dex) {
+    nlohmann::json payload = {
+        {"type", "perpDexStatus"},
+        {"dex", dex}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::tokenDetails(const std::string& token_id) {
+    nlohmann::json payload = {
+        {"type", "tokenDetails"},
+        {"tokenId", token_id}
     };
     return post("/info", payload);
 }
