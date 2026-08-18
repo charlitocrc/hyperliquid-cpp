@@ -637,6 +637,189 @@ public:
     nlohmann::json queryPerpDeployAuctionStatus();
 
     /**
+     * Perpetuals metadata for every perp dex in one call.
+     *
+     * Index-aligned with perpDexs(), so element 0 is the default dex and
+     * element i describes the dex named by perpDexs()[i].
+     *
+     * **The docs are wrong about the shape.** They show `[[meta, assetCtxs],
+     * ...]` — a metaAndAssetCtxs() payload per dex. Live mainnet returns bare
+     * meta objects with no contexts at all, verified across all 11 dexes. For
+     * contexts, call metaAndAssetCtxs(dex) per dex.
+     *
+     * @return [{universe, marginTables, collateralToken}, ...], one per dex,
+     *         each element shaped like the meta() response.
+     */
+    nlohmann::json allPerpMetas();
+
+    /**
+     * A user's leverage, tradable size and available balance for one coin.
+     *
+     * Perps only. The same data is available over the websocket as the
+     * `activeAssetData` subscription; this is the request form.
+     *
+     * maxTradeSzs and availableToTrade are both [buy, sell] pairs.
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @param coin Coin name, e.g. "ETH" or "xyz:NVDA"
+     * @return {
+     *           user: str, coin: str,
+     *           leverage: {type: "cross" | "isolated", value: int,
+     *                      rawUsd?: float string},   // rawUsd only when isolated
+     *           maxTradeSzs: [float string, float string],
+     *           availableToTrade: [float string, float string],
+     *           markPx: float string
+     *         }
+     */
+    nlohmann::json activeAssetData(const std::string& user, const std::string& coin);
+
+    /**
+     * State of the spot token deploy auction, plus any deployment this user has
+     * in progress.
+     *
+     * @param user Address in 42-character hexadecimal format. The deployer
+     *             whose in-flight deployments are reported; `states` is empty
+     *             for an address that has not started one.
+     * @return {
+     *           states: [{token, spec: {name, szDecimals, weiDecimals},
+     *                     fullName, spots, maxSupply,
+     *                     hyperliquidityGenesisBalance, totalGenesisBalanceWei,
+     *                     userGenesisBalances, existingTokenGenesisBalances}, ...],
+     *           gasAuction: {startTimeSeconds, durationSeconds,
+     *                        startGas, currentGas, endGas}   // gas as float strings
+     *         }
+     */
+    nlohmann::json spotDeployState(const std::string& user);
+
+    /**
+     * State of the Dutch auction for deploying a spot pair between two existing
+     * tokens. Same shape as queryPerpDeployAuctionStatus(), different auction.
+     *
+     * @return {startTimeSeconds: int, durationSeconds: int,
+     *          startGas / currentGas / endGas: float string | null}
+     */
+    nlohmann::json spotPairDeployAuctionStatus();
+
+    /**
+     * Every prediction-market outcome currently trading, plus the questions
+     * grouping them.
+     *
+     * The docs show only `{outcomes: [...]}`; live mainnet also returns
+     * `questions`, `deployers` and `feeScale`, and each outcome carries a
+     * `quoteToken` the docs omit.
+     *
+     * @return {
+     *           outcomes: [{outcome: int, name, description, quoteToken,
+     *                       sideSpecs: [{name}, ...]}, ...],
+     *           questions: [{question: int, name, description, fallbackOutcome,
+     *                        namedOutcomes, settledNamedOutcomes}, ...],
+     *           deployers: [...],
+     *           feeScale: float string
+     *         }
+     */
+    nlohmann::json outcomeMeta();
+
+    /**
+     * How a prediction-market outcome settled.
+     *
+     * @param outcome Outcome index, as listed by outcomeMeta()
+     * @return null while the outcome is still open (or does not exist), so a
+     *         null answer does not distinguish the two. Once settled:
+     *         {spec: {outcome, name, description, sideSpecs, quoteToken},
+     *          settleFraction: float string,   // "1.0" = Yes, "0.0" = No
+     *          details: str,                   // e.g. "price:79980"
+     *          question?: {...}}               // named outcomes only
+     */
+    nlohmann::json settledOutcome(int64_t outcome);
+
+    /**
+     * A user's staking totals.
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return {delegated: float string, undelegated: float string,
+     *          totalPendingWithdrawal: float string, nPendingWithdrawals: int}
+     */
+    nlohmann::json userStakingSummary(const std::string& user);
+
+    /**
+     * A user's stake per validator.
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return [{validator: address, amount: float string,
+     *           lockedUntilTimestamp: int}, ...]
+     */
+    nlohmann::json userStakingDelegations(const std::string& user);
+
+    /**
+     * A user's historical staking rewards, newest first.
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return [{time: int, source: "delegation" | "commission",
+     *           totalAmount: float string}, ...]. Commission entries appear
+     *          only for validators.
+     */
+    nlohmann::json userStakingRewards(const std::string& user);
+
+    /**
+     * A user's staking event history: delegations, undelegations, deposits and
+     * withdrawals, newest first.
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return [{time: int, hash: str, delta: {...}}, ...] where delta is one of
+     *         {delegate: {validator, amount, isUndelegate}},
+     *         {cDeposit: {amount}} or
+     *         {withdrawal: {amount, phase: "initiated" | "finalized"}}.
+     *         Protocol-generated entries carry an all-zero hash.
+     */
+    nlohmann::json delegatorHistory(const std::string& user);
+
+    /**
+     * A user's borrow/lend positions.
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return {
+     *           tokenToState: [[token index,
+     *                           {borrow: {basis, value},
+     *                            supply: {basis, value}}], ...],  // float strings
+     *           health: str,                    // e.g. "healthy"
+     *           healthFactor: float string | null
+     *         }
+     *         tokenToState is empty for an account with no borrow/lend activity.
+     */
+    nlohmann::json borrowLendUserState(const std::string& user);
+
+    /**
+     * Rates, utilization and collateral parameters for one borrow/lend reserve.
+     *
+     * @param token Token index, as used by spotMeta() (0 is USDC)
+     * @return {borrowYearlyRate, supplyYearlyRate, balance, utilization,
+     *          oraclePx, ltv, totalSupplied, totalBorrowed}, all float strings.
+     *          An ltv of "0.0" means the token is not accepted as collateral.
+     */
+    nlohmann::json borrowLendReserveState(int64_t token);
+
+    /**
+     * Every borrow/lend reserve in one call.
+     *
+     * @return [[token index, {reserve state}], ...], each state shaped like
+     *         the borrowLendReserveState() response.
+     */
+    nlohmann::json allBorrowLendReserveStates();
+
+    /**
+     * Agent (API) wallets approved for a user, from approveAgent().
+     *
+     * Distinct from approvedBuilders(), which lists builders rather than agents.
+     *
+     * @param user Address in 42-character hexadecimal format
+     * @return [{name: str, address: str, validUntil: int | null}, ...].
+     *         validUntil is **null** for agents that do not expire, though the
+     *         docs type it as an int; verified live. Empty for an account with
+     *         no agents.
+     */
+    nlohmann::json extraAgents(const std::string& user);
+
+    /**
      * Manually register perpetual metadata
      * Users must call this to enable nameToAsset() for perp markets
      */

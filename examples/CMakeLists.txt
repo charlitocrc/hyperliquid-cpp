@@ -20,6 +20,7 @@ set(EXAMPLES
     approve_agent
     sub_accounts
     multi_sig
+    staking_lending_and_outcomes
     dex_and_token_info
 )
 

@@ -120,6 +120,47 @@ int main() {
         std::cout << "  circulatingSupply: " << token.value("circulatingSupply", "?") << "\n";
         std::cout << "  markPx:            " << token.value("markPx", "?") << "\n";
 
+        // Every dex's metadata in one request, index-aligned with perpDexs().
+        // The docs show [meta, assetCtxs] pairs here; live returns bare metas,
+        // so use metaAndAssetCtxs(dex) when contexts are needed.
+        std::cout << "\n=== allPerpMetas ===\n";
+        auto all_metas = info.allPerpMetas();
+        auto dexs = info.perpDexs();
+        std::cout << "  " << all_metas.size() << " dexes ("
+                  << dexs.size() << " listed by perpDexs)\n";
+        for (size_t i = 0; i < 3 && i < all_metas.size(); ++i) {
+            const auto& universe = all_metas[i]["universe"];
+            std::cout << "    [" << i << "] "
+                      << (dexs[i].is_null() ? "(default)" : dexs[i].value("name", "?"))
+                      << ": " << universe.size() << " coins, first "
+                      << universe[0].value("name", "?") << "\n";
+        }
+
+        // Per-user, per-coin trading limits. Perps only; maxTradeSzs and
+        // availableToTrade are [buy, sell] pairs.
+        std::cout << "\n=== activeAssetData ===\n";
+        const std::string user = "0x010461c14e146ac35fe42271bdc1134ee31c703a";
+        auto active = info.activeAssetData(user, "BTC");
+        std::cout << "  leverage:         " << active["leverage"]["type"].get<std::string>()
+                  << " " << active["leverage"]["value"] << "x\n";
+        std::cout << "  maxTradeSzs:      " << active["maxTradeSzs"][0].get<std::string>()
+                  << " buy / " << active["maxTradeSzs"][1].get<std::string>() << " sell\n";
+        std::cout << "  availableToTrade: " << active["availableToTrade"][0].get<std::string>()
+                  << "\n";
+        std::cout << "  markPx:           " << active.value("markPx", "?") << "\n";
+
+        // Both spot deploy auctions. spotDeployState also reports whatever
+        // deployment the given deployer has in flight; states is empty for an
+        // address that has not started one.
+        std::cout << "\n=== spot deploy auctions ===\n";
+        auto deploy_state = info.spotDeployState(user);
+        const auto& gas_auction = deploy_state["gasAuction"];
+        std::cout << "  token auction gas:  " << gas_auction.value("currentGas", "?")
+                  << " (started at " << gas_auction.value("startGas", "?") << ")\n";
+        std::cout << "  in-flight deploys:  " << deploy_state["states"].size() << "\n";
+        auto pair_auction = info.spotPairDeployAuctionStatus();
+        std::cout << "  pair auction gas:   " << pair_auction.value("currentGas", "?") << "\n";
+
         return 0;
 
     } catch (const std::exception& e) {

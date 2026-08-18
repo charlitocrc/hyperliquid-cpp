@@ -188,6 +188,25 @@ int main() {
         std::cout << "  Response: " << vault_equities.dump(2) << "\n";
     }
 
+    // --- extraAgents ---
+    // Agent (API) wallets approved via Exchange::approveAgent(). Distinct from
+    // approvedBuilders(). validUntil is null for agents that do not expire.
+    std::cout << "\n=== Extra Agents for " << vault << " ===\n";
+    auto agents = info.extraAgents(vault);
+    if (agents.empty()) {
+        std::cout << "  No agents.\n";
+    } else {
+        for (const auto& agent : agents) {
+            std::cout << "  - " << agent.value("name", "(unnamed)")
+                      << " " << agent.value("address", "?") << " valid until ";
+            if (agent["validUntil"].is_null()) {
+                std::cout << "never expires\n";
+            } else {
+                std::cout << agent["validUntil"] << "\n";
+            }
+        }
+    }
+
     std::cout << "\nAll account queries completed successfully.\n";
     return 0;
 }

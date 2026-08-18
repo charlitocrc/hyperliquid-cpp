@@ -705,6 +705,115 @@ nlohmann::json Info::queryPerpDeployAuctionStatus() {
     return post("/info", payload);
 }
 
+nlohmann::json Info::allPerpMetas() {
+    nlohmann::json payload = {
+        {"type", "allPerpMetas"}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::activeAssetData(const std::string& user, const std::string& coin) {
+    nlohmann::json payload = {
+        {"type", "activeAssetData"},
+        {"user", user},
+        {"coin", coin}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::spotDeployState(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "spotDeployState"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::spotPairDeployAuctionStatus() {
+    nlohmann::json payload = {
+        {"type", "spotPairDeployAuctionStatus"}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::outcomeMeta() {
+    nlohmann::json payload = {
+        {"type", "outcomeMeta"}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::settledOutcome(int64_t outcome) {
+    nlohmann::json payload = {
+        {"type", "settledOutcome"},
+        {"outcome", outcome}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::userStakingSummary(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "delegatorSummary"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::userStakingDelegations(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "delegations"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::userStakingRewards(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "delegatorRewards"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::delegatorHistory(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "delegatorHistory"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::borrowLendUserState(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "borrowLendUserState"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::borrowLendReserveState(int64_t token) {
+    nlohmann::json payload = {
+        {"type", "borrowLendReserveState"},
+        {"token", token}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::allBorrowLendReserveStates() {
+    nlohmann::json payload = {
+        {"type", "allBorrowLendReserveStates"}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::extraAgents(const std::string& user) {
+    nlohmann::json payload = {
+        {"type", "extraAgents"},
+        {"user", user}
+    };
+    return post("/info", payload);
+}
+
 nlohmann::json Info::userFundingHistory(const std::string& user,
                                         int64_t start_time,
                                         std::optional<int64_t> end_time) {

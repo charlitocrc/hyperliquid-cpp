@@ -14,6 +14,7 @@ A C++ SDK for interacting with the Hyperliquid decentralized exchange, supportin
 - ✅ Transfer USD and spot tokens
 - ✅ Leverage management
 - ✅ Multi-signature accounts
+- ✅ Staking, borrow/lend and prediction-market queries
 - ✅ Full EIP-712 signing support
 - ✅ Testnet and Mainnet support
 
@@ -505,7 +506,53 @@ nlohmann::json queryOrderByOid(const std::string& user, int64_t oid);
 
 // Multi-sig signer set, or null if the address is not a multi-sig account
 nlohmann::json queryUserToMultiSigSigners(const std::string& multi_sig_user);
+
+// Metadata for every perp dex at once, index-aligned with perpDexs().
+// Note: returns bare metas, not the [meta, ctxs] pairs the docs show.
+nlohmann::json allPerpMetas();
+
+// Leverage, max trade size and available balance for one user and coin (perps
+// only). maxTradeSzs and availableToTrade are [buy, sell] pairs.
+nlohmann::json activeAssetData(const std::string& user, const std::string& coin);
+
+// Agent (API) wallets approved for a user. validUntil is null when the agent
+// does not expire, despite the docs typing it as an int.
+nlohmann::json extraAgents(const std::string& user);
 ```
+
+#### Staking, Borrow/Lend and Outcomes
+
+Read-only so far — the matching exchange actions (`cDeposit`, `tokenDelegate`,
+borrow/lend operations, `userOutcome`) are not implemented yet. Amounts come
+back as decimal strings throughout.
+
+```cpp
+// Staking. The wire types are named for the question rather than the answer,
+// so these send "delegatorSummary", "delegations" and "delegatorRewards".
+nlohmann::json userStakingSummary(const std::string& user);
+nlohmann::json userStakingDelegations(const std::string& user);
+nlohmann::json userStakingRewards(const std::string& user);
+nlohmann::json delegatorHistory(const std::string& user);
+
+// Borrow/lend. token is a numeric token index (0 is USDC); an ltv of "0.0"
+// means the token is not accepted as collateral.
+nlohmann::json borrowLendUserState(const std::string& user);
+nlohmann::json borrowLendReserveState(int64_t token);
+nlohmann::json allBorrowLendReserveStates();
+
+// Prediction markets. settledOutcome returns null while an outcome is still
+// open, and also for an index that does not exist.
+nlohmann::json outcomeMeta();
+nlohmann::json settledOutcome(int64_t outcome);
+
+// Spot deploy auctions. spotDeployState also reports the deployments the given
+// deployer has in flight.
+nlohmann::json spotDeployState(const std::string& user);
+nlohmann::json spotPairDeployAuctionStatus();
+```
+
+Run `./build/examples/staking_lending_and_outcomes [address]` for a live tour
+of all of these — no private key needed.
 
 ### Wallet Class
 

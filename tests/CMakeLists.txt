@@ -1,5 +1,6 @@
 set(TESTS
     info_perp_deployment_queries_test
+    info_account_queries_test
     twap_orders_test
     rate_limits_margin_test
     usd_class_transfer_test

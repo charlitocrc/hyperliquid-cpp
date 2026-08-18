@@ -8,7 +8,7 @@ docs (Info / Exchange / WebSocket endpoints) and cross-checked against the reque
 
 **Implemented today** (verified against source, not aspiration):
 
-- Info (43 request types): `allMids`, `clearinghouseState`, `spotClearinghouseState`, `openOrders`,
+- Info (56 request types): `allMids`, `clearinghouseState`, `spotClearinghouseState`, `openOrders`,
   `frontendOpenOrders`, `historicalOrders`, `orderStatus`, `l2Book`, `candleSnapshot`, `meta`,
   `metaAndAssetCtxs`, `spotMeta`, `spotMetaAndAssetCtxs`, `perpDexs`, `perpDeployAuctionStatus`,
   `userFills`, `userFillsByTime`, `userFunding`, `fundingHistory`, `userNonFundingLedgerUpdates`,
@@ -16,7 +16,10 @@ docs (Info / Exchange / WebSocket endpoints) and cross-checked against the reque
   `subAccounts`, `referral`, `portfolio`, `maxBuilderFee`, `approvedBuilders`, `userDexAbstraction`,
   `userAbstraction`, `perpDexLimits`, `perpDexStatus`, `tokenDetails`, `predictedFundings`,
   `perpsAtOpenInterestCap`, `perpCategories`, `perpConciseAnnotations`, `perpAnnotation`,
-  `userToMultiSigSigners`
+  `userToMultiSigSigners`, `allPerpMetas`, `activeAssetData`, `spotDeployState`,
+  `spotPairDeployAuctionStatus`, `outcomeMeta`, `settledOutcome`, `delegatorSummary`,
+  `delegations`, `delegatorRewards`, `delegatorHistory`, `borrowLendUserState`,
+  `borrowLendReserveState`, `allBorrowLendReserveStates`, `extraAgents`
 - Exchange (25 actions): `order`, `cancel`, `cancelByCloid`, `modify`, `batchModify`, `scheduleCancel`,
   `updateLeverage`, `updateIsolatedMargin`, `topUpIsolatedOnlyMargin`, `usdSend`, `spotSend`,
   `usdClassTransfer`, `sendAsset`, `twapOrder`, `twapCancel`, `reserveRequestWeight`,
@@ -24,10 +27,11 @@ docs (Info / Exchange / WebSocket endpoints) and cross-checked against the reque
   `subAccountSpotTransfer`, `convertToMultiSigUser`, `multiSig`
 - Market orders (`marketOpen` / `marketClose`), EIP-712 signing, ECDSA secp256k1 wallet,
   automatic tick/lot rounding, `setExpiresAfter`
-- 21 working examples in `examples/` (one needs BUILD_WEBSOCKET)
+- 22 working examples in `examples/` (one needs BUILD_WEBSOCKET)
 
-**Not implemented at all:** staking, borrow/lend, vaults, token/perp deployment,
-prediction-market outcomes.
+**Not implemented at all:** vaults, token/perp deployment. Staking, borrow/lend and
+prediction-market outcomes are read-only so far: every info query ships, none of the
+exchange actions do.
 
 ---
 
@@ -347,11 +351,14 @@ None of these three are in `hyperliquid_api_docs.md`; request/response shapes ab
 established against live mainnet. All five are covered in
 `tests/info_perp_deployment_queries_test.cpp` and shown in `examples/dex_and_token_info.cpp`.
 
-Still open in this block:
-
-- [ ] `allPerpMetas()` - `allPerpMetas`; meta + ctxs for every dex in one call
-- [ ] `activeAssetData()` - `activeAssetData`; leverage, max trade size, available-to-trade.
-      Currently only reachable via WebSocket in the Python SDK; the info endpoint supports it too.
+- [x] `allPerpMetas()` - `allPerpMetas`; metadata for every dex in one call, index-aligned
+      with `perpDexs()` (11 dexes live). **The docs are wrong about the shape**: they show
+      `[[meta, assetCtxs], ...]`, but live mainnet returns bare meta objects with no contexts
+      at all. Use `metaAndAssetCtxs(dex)` per dex when contexts are needed.
+- [x] `activeAssetData()` - `activeAssetData`; leverage, max trade size, available-to-trade
+      for one user and coin. Perps only. `maxTradeSzs` and `availableToTrade` are
+      `[buy, sell]` pairs. The Python SDK reaches this only over the WebSocket; the info
+      endpoint serves it too.
 
 - [x] Extend `Meta` / `AssetInfo` with `marginTables`, `marginTableId`, `marginMode`,
       `growthMode`, `collateralToken`, `isDelisted`. Field set verified against live
@@ -370,35 +377,65 @@ the tier for a given notional. Callers do the lookup themselves.
 
 - [x] `tokenDetails()` - `tokenDetails`; supply, genesis, deployer, deploy gas. Takes the
       34-char onchain `tokenId` (the `SpotTokenInfo::token_id` field), not a 42-char address.
-- [ ] `spotDeployState()` - `spotDeployState`; spot deploy auction state
-- [ ] `spotPairDeployAuctionStatus()` - `spotPairDeployAuctionStatus`
+- [x] `spotDeployState()` - `spotDeployState`; requires `user`. Returns the token deploy
+      gas auction plus that deployer's in-flight deployments (`states`, empty for an
+      address that has not started one).
+- [x] `spotPairDeployAuctionStatus()` - `spotPairDeployAuctionStatus`; the separate Dutch
+      auction for deploying a pair between two existing tokens. Same shape as
+      `perpDeployAuctionStatus`.
 
 ### Prediction Markets / Outcomes (entirely new surface)
 
-- [ ] `outcomeMeta()` - `outcomeMeta`
-- [ ] `settledOutcome()` - `settledOutcome`
+- [x] `outcomeMeta()` - `outcomeMeta`. The docs show only `{outcomes: [...]}`; live also
+      returns `questions`, `deployers` and `feeScale`, and each outcome carries a
+      `quoteToken` the docs omit. The `sideSpecs`/`OutcomeSpec`/`QuestionSpec` shapes match
+      the `outcomeMetaUpdates` websocket types already in `ws_types.hpp`.
+- [x] `settledOutcome()` - `settledOutcome`; takes an outcome index. Returns **null** while
+      the outcome is open *and* for an index that does not exist, so a null answer does not
+      distinguish the two. Settled entries add an undocumented `question` object for named
+      outcomes.
 - [ ] `userOutcome()` exchange action - split / merge outcome, merge question, negate outcome
 
 ### Staking
 
-- [ ] `userStakingSummary()` - delegated, undelegated, pending withdrawals
-- [ ] `userStakingDelegations()` - per-validator, with locked-until timestamps
-- [ ] `userStakingRewards()` - source `"delegation"` or `"commission"`
-- [ ] `delegatorHistory()`
+Read side done. The four wire types are named after the question, not the answer
+(`delegatorSummary`, `delegations`, `delegatorRewards`), so the method-to-type mapping is
+pinned in `tests/info_account_queries_test.cpp`.
+
+- [x] `userStakingSummary()` - `delegatorSummary`; delegated, undelegated, pending withdrawals
+- [x] `userStakingDelegations()` - `delegations`; per-validator, with locked-until timestamps
+- [x] `userStakingRewards()` - `delegatorRewards`; source `"delegation"` or `"commission"`,
+      the latter only for validators
+- [x] `delegatorHistory()` - `delegatorHistory`; delegate / cDeposit / withdrawal deltas as
+      tagged objects. Protocol-generated entries carry an all-zero hash.
 - [ ] `cDeposit()` / `cWithdraw()` exchange actions - deposit into / withdraw from staking
 - [ ] `tokenDelegate()` exchange action - delegate/undelegate to a validator
 
 ### Borrow/Lend
 
-- [ ] `borrowLendUserState()` - borrow/supply basis and value per token
-- [ ] `borrowLendReserveState()` - rates, utilization, balance, LTV, oracle price
-- [ ] `allBorrowLendReserveStates()`
+- [x] `borrowLendUserState()` - `borrowLendUserState`; `tokenToState` is
+      `[[token, {borrow: {basis, value}, supply: {basis, value}}], ...]`, `basis` being
+      principal and `value` principal plus accrued interest. `healthFactor` is null when
+      nothing is borrowed.
+- [x] `borrowLendReserveState()` - `borrowLendReserveState`; takes a numeric token index.
+      Rates, utilization, balance, LTV, oracle price. An `ltv` of `"0.0"` means the token
+      is not accepted as collateral (true of USDC today).
+- [x] `allBorrowLendReserveStates()` - `[[token, state], ...]`; 5 reserves live.
 
 ### Account
 
-- [ ] `extraAgents()` - agent names, addresses, validity timestamps. Distinct from the
-      already-implemented `approvedBuilders()`.
-- [ ] `alignedQuoteTokenInfo()` - isAligned, firstAlignedTime, evmMintedSupply, dailyAmountOwed
+- [x] `extraAgents()` - `extraAgents`; agent names, addresses, validity timestamps.
+      Distinct from the already-implemented `approvedBuilders()`. **`validUntil` is null**
+      for agents that do not expire, though both the docs and the Python SDK type it as an
+      int; verified live.
+- [ ] `alignedQuoteTokenInfo()` - isAligned, firstAlignedTime, evmMintedSupply, dailyAmountOwed.
+      **Not implemented: the request could not be made to work against either network.**
+      The December docs snapshot documents it as `{type, token: <index>}`, but that and every
+      other spelling tried (`tokens`, `tokenIndex`, `coin`, string token, no params, plural
+      type name) return "Failed to deserialize the JSON body into the target type" on both
+      mainnet and testnet, while known-good requests on the same connection succeed. The
+      current docs page no longer lists it. Likely not served yet — there are no aligned
+      quote assets on mainnet. Retry when one is deployed rather than shipping a guess.
 - [x] `queryUserToMultiSigSigners()` - `userToMultiSigSigners`; the account's authorized
       users and threshold. Returns **null** for an address that is not a multi-sig account
       (verified live), which is how the multi-sig example checks before signing anything.
@@ -592,15 +629,15 @@ Revisit when the Abstraction actions land.
 | Token Details | ✅ | ✅ | Complete |
 | Perp Dex Limits / Status | ✅ | ✅ | Complete |
 | Margin Tables | ✅ | ✅ | Complete (parsed into `Meta`; no tier-lookup helper) |
-| Borrow/Lend | ✅ | ❌ | TODO |
+| Borrow/Lend | ✅ | ⚠️ | Read-only (queries done, actions missing) |
 | **Real-Time** |
 | WebSocket (24 subscriptions) | ✅ | ✅ | Complete (raw JSON callbacks; no typed structs) |
 | WebSocket POST requests | ✅ | ❌ | TODO |
 | **Advanced** |
 | Agents / Referrals / Builders | ✅ | ⚠️ | Partial (`approveAgent`, `approveBuilderFee` + read queries; `setReferrer` missing) |
 | Dex Abstraction | ✅ | ⚠️ | Read-only (queries done, actions missing) |
-| Staking | ✅ | ❌ | TODO |
-| Prediction Markets / Outcomes | ✅ | ❌ | TODO |
+| Staking | ✅ | ⚠️ | Read-only (queries done, actions missing) |
+| Prediction Markets / Outcomes | ✅ | ⚠️ | Read-only (queries done, actions missing) |
 | Multi-Sig | ✅ | ✅ | Complete |
 | Token / Perp Deployment | ✅ | ❌ | TODO |
 | Validators | ✅ | ❌ | TODO |
@@ -621,8 +658,10 @@ requests and the typed message structs.
 Sub-accounts, vault transfers, `usdClassTransfer`, bridge withdrawal, agents, referrals.
 
 ### Phase 4: New Surfaces
-Staking, borrow/lend, prediction-market outcomes, the newly-documented perp queries
-(`predictedFundings`, `allPerpMetas`, `perpDexLimits`, annotations), margin-table modeling.
+Info queries all done — staking, borrow/lend, outcomes, `allPerpMetas`, `activeAssetData`,
+`predictedFundings`, `perpDexLimits`, annotations, margin-table modeling. Still open: the
+exchange actions behind them (`cDeposit`/`cWithdraw`/`tokenDelegate`, borrow/lend
+operations, `userOutcome`).
 
 ### Phase 5: Specialized
 ~~Multi-sig~~ done. Still open: validators, token/perp deployment.
@@ -648,7 +687,8 @@ Tests, CI, packaging, docs, cross-platform.
 
 ## Notes
 
-- **Biggest gaps, in order**: staking, borrow/lend, WS POST requests.
+- **Biggest gaps, in order**: WS POST requests, then the staking/borrow-lend/outcome
+  exchange actions — every read side of those three now ships.
 - **Silent drift to watch**: `Meta` is the one API response parsed into a struct rather than
   returned as raw JSON, so any field the exchange adds is dropped silently. `marginTables` /
   `marginMode` / `growthMode` / `collateralToken` are modeled now; re-check the field union
