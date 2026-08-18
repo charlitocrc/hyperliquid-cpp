@@ -275,6 +275,8 @@ nlohmann::json marketClose(const std::string& coin,
 nlohmann::json cancel(const std::string& coin, int64_t oid);
 
 // Cancel by Client Order ID
+// Cancel by client order id. Its own action ("cancelByCloid"), not the plain
+// cancel action with a cloid in the oid field.
 nlohmann::json cancelByCloid(const std::string& coin, const Cloid& cloid);
 
 // Bulk cancel

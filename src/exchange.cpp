@@ -243,15 +243,18 @@ nlohmann::json Exchange::bulkCancel(const std::vector<CancelRequest>& cancels) {
 nlohmann::json Exchange::bulkCancelByCloid(const std::vector<CancelByCloidRequest>& cancels) {
     nlohmann::ordered_json cancels_array = nlohmann::ordered_json::array();
     for (const auto& cancel : cancels) {
-        int asset = info_.nameToAsset(cancel.coin);
+        // Its own action, not "cancel" with a cloid in the oid slot: the wire
+        // names are spelled out here ("asset"/"cloid", not "a"/"o"), and the
+        // exchange types the "cancel" action's o as a uint64, so a cloid string
+        // there fails to deserialize before it ever reaches an order book.
         nlohmann::ordered_json cancel_obj;
-        cancel_obj["a"] = asset;
-        cancel_obj["o"] = cancel.cloid.toRaw();
+        cancel_obj["asset"] = info_.nameToAsset(cancel.coin);
+        cancel_obj["cloid"] = cancel.cloid.toRaw();
         cancels_array.push_back(cancel_obj);
     }
 
     nlohmann::ordered_json action;
-    action["type"] = "cancel";
+    action["type"] = "cancelByCloid";
     action["cancels"] = cancels_array;
 
     return postL1Action(action);

@@ -20,7 +20,7 @@ docs (Info / Exchange / WebSocket endpoints) and cross-checked against the reque
   `spotPairDeployAuctionStatus`, `outcomeMeta`, `settledOutcome`, `delegatorSummary`,
   `delegations`, `delegatorRewards`, `delegatorHistory`, `borrowLendUserState`,
   `borrowLendReserveState`, `allBorrowLendReserveStates`, `extraAgents`
-- Exchange (25 actions): `order`, `cancel`, `cancelByCloid`, `modify`, `batchModify`, `scheduleCancel`,
+- Exchange (24 actions): `order`, `cancel`, `cancelByCloid`, `batchModify`, `scheduleCancel`,
   `updateLeverage`, `updateIsolatedMargin`, `topUpIsolatedOnlyMargin`, `usdSend`, `spotSend`,
   `usdClassTransfer`, `sendAsset`, `twapOrder`, `twapCancel`, `reserveRequestWeight`,
   `approveBuilderFee`, `approveAgent`, `noop`, `setReferrer`, `createSubAccount`, `subAccountTransfer`,
@@ -32,6 +32,28 @@ docs (Info / Exchange / WebSocket endpoints) and cross-checked against the reque
 **Not implemented at all:** vaults, token/perp deployment. Staking, borrow/lend and
 prediction-market outcomes are read-only so far: every info query ships, none of the
 exchange actions do.
+
+### Docs cross-check (2026-08-18)
+
+Every documented request type was pulled from the live docs via MCP and diffed against the
+types `src/info.cpp`, `src/exchange.cpp` and `src/websocket_manager.cpp` actually emit.
+
+- **Info: complete.** All 54 types documented across the info endpoint, perpetuals and spot
+  pages are implemented. The SDK additionally ships `extraAgents` and `userToMultiSigSigners`,
+  which the current docs pages no longer list but which still answer on mainnet.
+- **WebSocket: complete.** All 24 documented subscriptions route.
+- **Exchange: 24 of the ~40 documented actions.** The gaps are listed below and were already
+  tracked; nothing new appeared on the exchange page.
+- **One bug found and fixed:** `cancelByCloid()` / `bulkCancelByCloid()` were sending
+  `{"type": "cancel", "cancels": [{"a": asset, "o": "<cloid>"}]}`. The exchange types that
+  action's `o` as a uint64, so every cloid cancellation failed to deserialize server-side and
+  no order was ever cancelled. It is its own action with spelled-out field names:
+  `{"type": "cancelByCloid", "cancels": [{"asset": N, "cloid": "0x..."}]}`. No test covered
+  it, which is how it survived; `tests/l1_action_signing_test.cpp` now pins it against the
+  Python SDK.
+- **Not a gap:** the docs list a separate `modify` action for a single order, but
+  `modifyOrder()` routes through `batchModify`, which the docs also document and which
+  accepts a one-element list. No behavioural difference, so no second method.
 
 ---
 
@@ -422,6 +444,11 @@ pinned in `tests/info_account_queries_test.cpp`.
       is not accepted as collateral (true of USDC today).
 - [x] `allBorrowLendReserveStates()` - `[[token, state], ...]`; 5 reserves live.
 
+No borrow/lend **exchange action** is documented for the HTTP endpoint. Supply and withdraw
+are reachable only from HyperEVM, as CoreWriter action id 15
+(`(encodedOperation, token, wei)`, 0 = Supply, 1 = Withdraw, `wei` 0 meaning "maximally
+apply"). So the read side above is the whole HTTP surface, not half of one.
+
 ### Account
 
 - [x] `extraAgents()` - `extraAgents`; agent names, addresses, validity timestamps.
@@ -514,9 +541,31 @@ Revisit when the Abstraction actions land.
       `spotDeployGenesis()`, `spotDeployRegisterSpot()`, `spotDeployRegisterHyperliquidity()`,
       `spotDeploySetDeployerTradingFeeShare()`
 
+### Prediction-Market Deployment (HIP-4) — newly documented, never tracked here
+
+- [ ] `activateOutcomeDeployer()` - `{type, activate: {venueName}}` /
+      `{type, deactivate: null}`. Venue name is 2-4 lowercase ASCII letters, unique across
+      all venue names including deactivated ones, and must not collide with a perp dex name.
+- [ ] `spotDeploy` `outcome` variants - `{type: "spotDeploy", outcome: {<variant>: {...}}}`.
+      Outcomes and questions are referenced by the numeric index assigned at creation.
+      Tuple lists sort lexicographically before signing; amounts and settlement fractions
+      are decimal strings.
+
+The read side of this surface (`outcomeMeta`, `settledOutcome`) already ships.
+
 ### Perp Deployment
 
-- [ ] `perpDeployRegisterAsset()`, `perpDeploySetOracle()`
+The docs now describe **14** `perpDeploy` variants, not the two tracked here. All share the
+`{"type": "perpDeploy", "<variant>": {...}}` envelope, and every list of tuples must be
+lexicographically sorted before signing:
+
+- [ ] `registerAsset2` (supersedes `registerAsset`: takes `marginMode` instead of
+      `onlyIsolated`; `maxGas` of 0 means a reserve deployment), `registerAsset`
+- [ ] `setOracle` — at least 2.5s between calls, deployers expected to call every 3s
+- [ ] `setFundingMultipliers`, `setFundingInterestRates`, `setMarginTableIds`,
+      `setMarginModes`, `setOpenInterestCaps`, `setDeployerFees` (mainnet: one change per
+      30 days), `setPerpAnnotation`
+- [ ] `haltTrading`, `disableDex`, `setFeeRecipient`, `setSubDeployers`
 
 ### Validator Operations
 
@@ -604,7 +653,7 @@ Revisit when the Abstraction actions land.
 |----------|-----------------|---------|--------|
 | **Core Trading** |
 | Limit / Market Orders | ✅ | ✅ | Complete |
-| Cancel / Modify / Bulk | ✅ | ✅ | Complete |
+| Cancel / Modify / Bulk | ✅ | ✅ | Complete (`modifyOrder` routes through `batchModify`) |
 | Schedule Cancel | ✅ | ✅ | Complete |
 | TWAP Orders | ✅ | ✅ | Complete |
 | **Account** |
@@ -629,7 +678,7 @@ Revisit when the Abstraction actions land.
 | Token Details | ✅ | ✅ | Complete |
 | Perp Dex Limits / Status | ✅ | ✅ | Complete |
 | Margin Tables | ✅ | ✅ | Complete (parsed into `Meta`; no tier-lookup helper) |
-| Borrow/Lend | ✅ | ⚠️ | Read-only (queries done, actions missing) |
+| Borrow/Lend | ✅ | ✅ | Complete (no HTTP action exists; writes are CoreWriter-only) |
 | **Real-Time** |
 | WebSocket (24 subscriptions) | ✅ | ✅ | Complete (raw JSON callbacks; no typed structs) |
 | WebSocket POST requests | ✅ | ❌ | TODO |
@@ -639,7 +688,7 @@ Revisit when the Abstraction actions land.
 | Staking | ✅ | ⚠️ | Read-only (queries done, actions missing) |
 | Prediction Markets / Outcomes | ✅ | ⚠️ | Read-only (queries done, actions missing) |
 | Multi-Sig | ✅ | ✅ | Complete |
-| Token / Perp Deployment | ✅ | ❌ | TODO |
+| Token / Perp Deployment | ✅ | ❌ | TODO (14 `perpDeploy` variants, 10 spot, HIP-4 outcomes) |
 | Validators | ✅ | ❌ | TODO |
 
 ---
@@ -687,8 +736,8 @@ Tests, CI, packaging, docs, cross-platform.
 
 ## Notes
 
-- **Biggest gaps, in order**: WS POST requests, then the staking/borrow-lend/outcome
-  exchange actions — every read side of those three now ships.
+- **Biggest gaps, in order**: WS POST requests, then the staking and outcome exchange
+  actions — every read side ships, and borrow/lend has no HTTP write side to miss.
 - **Silent drift to watch**: `Meta` is the one API response parsed into a struct rather than
   returned as raw JSON, so any field the exchange adds is dropped silently. `marginTables` /
   `marginMode` / `growthMode` / `collateralToken` are modeled now; re-check the field union
@@ -697,6 +746,6 @@ Tests, CI, packaging, docs, cross-platform.
 
 ---
 
-**Last Updated**: 2026-08-18
+**Last Updated**: 2026-08-18 (docs cross-checked via MCP)
 **Rebuilt from**: Hyperliquid docs (Info, Exchange, WebSocket endpoints) via MCP
 **C++ SDK Version**: 1.0.0
