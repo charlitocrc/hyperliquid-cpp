@@ -544,6 +544,72 @@ nlohmann::json Exchange::approveBuilderFee(const std::string& builder,
     return postAction(action, signature, action["nonce"]);
 }
 
+nlohmann::json Exchange::convertToMultiSigUser(const std::vector<std::string>& authorized_users,
+                                               int threshold) {
+    nlohmann::json action = {
+        {"type", "convertToMultiSigUser"},
+        {"signers", convertToMultiSigUserSigners(authorized_users, threshold)},
+        {"nonce", getTimestampMs()}
+    };
+
+    std::vector<EIP712Type> payload_types = {
+        {"hyperliquidChain", "string"},
+        {"signers", "string"},
+        {"nonce", "uint64"}
+    };
+
+    bool is_mainnet = (base_url_ == MAINNET_API_URL);
+    auto signature = signUserSignedAction(*wallet_, action, payload_types,
+                                         "HyperliquidTransaction:ConvertToMultiSigUser",
+                                         is_mainnet);
+
+    return postAction(action, signature, action["nonce"]);
+}
+
+nlohmann::json Exchange::multiSig(const std::string& multi_sig_user,
+                                  const nlohmann::ordered_json& inner_action,
+                                  const std::vector<Signature>& signatures,
+                                  int64_t nonce) {
+    if (signatures.empty()) {
+        throw std::invalid_argument("multiSig requires at least one signature");
+    }
+    if (!inner_action.contains("type")) {
+        throw std::invalid_argument("multiSig inner action must have a type field");
+    }
+
+    nlohmann::ordered_json signatures_array = nlohmann::ordered_json::array();
+    for (const auto& signature : signatures) {
+        signatures_array.push_back(nlohmann::ordered_json(signature.toJson()));
+    }
+
+    nlohmann::ordered_json payload;
+    payload["multiSigUser"] = normalizeAddress(multi_sig_user);
+    // The leader, which is this wallet: it sends the action, so its nonce is
+    // the one the exchange validates and consumes.
+    payload["outerSigner"] = normalizeAddress(wallet_->address());
+    payload["action"] = inner_action;
+
+    nlohmann::ordered_json action;
+    action["type"] = "multiSig";
+    action["signatureChainId"] = "0x66eee";
+    action["signatures"] = signatures_array;
+    action["payload"] = payload;
+
+    // Unlike the Python SDK, which signs over a vault argument but ships the
+    // Exchange's configured vault in the envelope, both come from the same
+    // place here -- otherwise the signature covers a vault the request does not
+    // carry, and the exchange cannot verify it.
+    std::optional<std::string> vault_opt;
+    if (!vault_address_.empty()) {
+        vault_opt = vault_address_;
+    }
+
+    auto signature = signMultiSigAction(*wallet_, action, vault_opt, nonce,
+                                       expires_after_, base_url_ == MAINNET_API_URL);
+
+    return postAction(action, signature, nonce);
+}
+
 nlohmann::json Exchange::updateLeverage(int leverage,
                                         const std::string& coin,
                                         bool is_cross) {

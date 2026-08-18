@@ -19,6 +19,7 @@ set(EXAMPLES
     approve_builder_fee
     approve_agent
     sub_accounts
+    multi_sig
     dex_and_token_info
 )
 

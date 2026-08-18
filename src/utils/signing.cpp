@@ -1,6 +1,7 @@
 #include "hyperliquid/utils/signing.hpp"
 #include "hyperliquid/utils/conversions.hpp"
 #include <msgpack.hpp>
+#include <algorithm>
 #include <sstream>
 #include <stdexcept>
 
@@ -242,6 +243,145 @@ Signature signUserSignedAction(const Wallet& wallet,
 
     // Sign the hash
     return wallet.signMessage(message_hash);
+}
+
+// Multi-signature
+
+std::vector<EIP712Type> addMultiSigTypes(const std::vector<EIP712Type>& sign_types) {
+    std::vector<EIP712Type> enriched;
+    enriched.reserve(sign_types.size() + 2);
+
+    for (const auto& sign_type : sign_types) {
+        enriched.push_back(sign_type);
+        if (sign_type.name == "hyperliquidChain") {
+            enriched.push_back({"payloadMultiSigUser", "address"});
+            enriched.push_back({"outerSigner", "address"});
+        }
+    }
+
+    if (enriched.size() == sign_types.size()) {
+        throw std::invalid_argument(
+            "Multi-sig sign types must contain hyperliquidChain; without it the "
+            "multi-sig fields have nowhere to go and the signature cannot be verified");
+    }
+
+    return enriched;
+}
+
+nlohmann::json addMultiSigFields(nlohmann::json action,
+                                 const std::string& payload_multi_sig_user,
+                                 const std::string& outer_signer) {
+    action["payloadMultiSigUser"] = normalizeAddress(payload_multi_sig_user);
+    action["outerSigner"] = normalizeAddress(outer_signer);
+    return action;
+}
+
+Signature signMultiSigUserSignedActionPayload(const Wallet& wallet,
+                                              const nlohmann::json& action,
+                                              const std::vector<EIP712Type>& sign_types,
+                                              const std::string& primary_type,
+                                              const std::string& payload_multi_sig_user,
+                                              const std::string& outer_signer,
+                                              bool is_mainnet) {
+    return signUserSignedAction(wallet,
+                                addMultiSigFields(action, payload_multi_sig_user, outer_signer),
+                                addMultiSigTypes(sign_types),
+                                primary_type,
+                                is_mainnet);
+}
+
+Signature signMultiSigL1ActionPayload(const Wallet& wallet,
+                                      const nlohmann::ordered_json& action,
+                                      const std::optional<std::string>& vault_address,
+                                      int64_t nonce,
+                                      std::optional<int64_t> expires_after,
+                                      const std::string& payload_multi_sig_user,
+                                      const std::string& outer_signer,
+                                      bool is_mainnet) {
+    nlohmann::ordered_json envelope = nlohmann::ordered_json::array({
+        normalizeAddress(payload_multi_sig_user),
+        normalizeAddress(outer_signer),
+        action
+    });
+
+    return signL1Action(wallet, envelope, vault_address, nonce, expires_after, is_mainnet);
+}
+
+Signature signMultiSigAction(const Wallet& wallet,
+                             const nlohmann::ordered_json& multi_sig_action,
+                             const std::optional<std::string>& vault_address,
+                             int64_t nonce,
+                             std::optional<int64_t> expires_after,
+                             bool is_mainnet) {
+    // The tag is dropped before hashing: the exchange hashes the action's
+    // fields, not the variant name it dispatched on.
+    nlohmann::ordered_json action_without_tag = multi_sig_action;
+    action_without_tag.erase("type");
+
+    auto hash = actionHash(action_without_tag, vault_address, nonce, expires_after);
+
+    nlohmann::json envelope = {
+        {"multiSigActionHash", bytesToHex(hash, true)},
+        {"nonce", nonce}
+    };
+
+    std::vector<EIP712Type> payload_types = {
+        {"hyperliquidChain", "string"},
+        {"multiSigActionHash", "bytes32"},
+        {"nonce", "uint64"}
+    };
+
+    return signUserSignedAction(wallet, envelope, payload_types,
+                                "HyperliquidTransaction:SendMultiSig", is_mainnet);
+}
+
+std::string convertToMultiSigUserSigners(const std::vector<std::string>& authorized_users,
+                                         int threshold) {
+    // Documented cap; rejecting here saves a request that the exchange refuses.
+    constexpr size_t MAX_AUTHORIZED_USERS = 10;
+
+    if (authorized_users.empty()) {
+        throw std::invalid_argument(
+            "convertToMultiSigUser needs at least one authorized user. To convert a "
+            "multi-sig user back to a normal user, send an inner action with "
+            "signers \"null\" through multiSig()");
+    }
+    if (authorized_users.size() > MAX_AUTHORIZED_USERS) {
+        throw std::invalid_argument("convertToMultiSigUser allows at most 10 authorized users");
+    }
+    if (threshold < 1 || static_cast<size_t>(threshold) > authorized_users.size()) {
+        throw std::invalid_argument(
+            "convertToMultiSigUser threshold must be between 1 and the number of "
+            "authorized users; a higher threshold leaves the account unable to sign");
+    }
+
+    std::vector<std::string> sorted_users;
+    sorted_users.reserve(authorized_users.size());
+    for (const auto& user : authorized_users) {
+        sorted_users.push_back(normalizeAddress(user));
+    }
+    std::sort(sorted_users.begin(), sorted_users.end());
+
+    // A repeated address cannot sign twice, so it silently lowers the number of
+    // distinct signers the threshold can ever reach.
+    if (std::adjacent_find(sorted_users.begin(), sorted_users.end()) != sorted_users.end()) {
+        throw std::invalid_argument("convertToMultiSigUser authorized users must be distinct");
+    }
+
+    // Built by hand rather than with json::dump() to reproduce Python's
+    // json.dumps spacing byte for byte. The exchange signs this string as a
+    // string, so the two SDKs' signatures only line up if the bytes do -- which
+    // is what tests/multi_sig_test.cpp pins.
+    std::string signers = "{\"authorizedUsers\": [";
+    for (size_t i = 0; i < sorted_users.size(); ++i) {
+        if (i > 0) {
+            signers += ", ";
+        }
+        signers += "\"" + sorted_users[i] + "\"";
+    }
+    signers += "], \"threshold\": " + std::to_string(threshold) + "}";
+
+    return signers;
 }
 
 // Order conversion

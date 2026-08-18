@@ -299,6 +299,72 @@ public:
                                          double amount);
 
     /**
+     * Convert this account into a multi-sig account: from here on, every one
+     * of its actions must arrive wrapped in multiSig(), signed by at least
+     * `threshold` of the authorized users.
+     *
+     * Wire action: {"type": "convertToMultiSigUser", "signers": "<json string>",
+     *               "nonce": N}, where signers is a JSON *string* built by
+     * convertToMultiSigUserSigners().
+     *
+     * Constraints the exchange imposes, checked here so a bad call costs no
+     * request: at most 10 authorized users, threshold in [1, users], and every
+     * authorized user must already exist on Hyperliquid (i.e. have deposited).
+     * Only the account's own wallet can do this -- agent wallets are rejected.
+     *
+     * Changing the signer set later, or converting back to a normal user, has
+     * to travel through multiSig() as an inner action, since a converted
+     * account can no longer send anything on its own. See examples/multi_sig.cpp.
+     *
+     * Do not interact with HyperEVM from a multi-sig account: conversion does
+     * not move the EVM side, which stays controlled by the original key.
+     *
+     * User-signed action (EIP-712,
+     * HyperliquidTransaction:ConvertToMultiSigUser).
+     *
+     * @param authorized_users Addresses allowed to sign for this account
+     * @param threshold Minimum signatures required per action
+     */
+    nlohmann::json convertToMultiSigUser(const std::vector<std::string>& authorized_users,
+                                        int threshold);
+
+    /**
+     * Send an action on behalf of a multi-sig account, carrying the signatures
+     * collected from its authorized users.
+     *
+     * This wallet is the leader: it signs the outer envelope, its nonce is the
+     * one the exchange consumes, and it must itself be an authorized user of
+     * `multi_sig_user` (or an agent of one). It does not have to be one of the
+     * signers in `signatures`.
+     *
+     * The inner action is built and signed separately, once per authorized
+     * user, over the *same* nonce and leader address as passed here:
+     *   - L1 actions (order, cancel, ...): signMultiSigL1ActionPayload()
+     *   - user-signed actions (sendAsset, convertToMultiSigUser, ...):
+     *     signMultiSigUserSignedActionPayload(), and the inner action must
+     *     then also carry "signatureChainId" and "hyperliquidChain", since
+     *     nothing adds them for you on this path
+     *
+     * Key order in `inner_action` is preserved into the signed hash, so build
+     * it the way the exchange orders it. orderWiresToOrderAction() produces a
+     * correctly ordered order action.
+     *
+     * A vault/subaccount configured on this Exchange is signed over and sent,
+     * as with any ordinary action. It applies to the inner action, so the same
+     * value must have been passed to signMultiSigL1ActionPayload().
+     *
+     * @param multi_sig_user The multi-sig account the action acts on
+     * @param inner_action The wrapped action
+     * @param signatures At least `threshold` signatures from authorized users
+     * @param nonce The nonce every signer signed over. Reuse the value passed
+     *              to the sign* calls; getTimestampMs() is the usual source.
+     */
+    nlohmann::json multiSig(const std::string& multi_sig_user,
+                           const nlohmann::ordered_json& inner_action,
+                           const std::vector<Signature>& signatures,
+                           int64_t nonce);
+
+    /**
      * Update leverage for a coin
      */
     nlohmann::json updateLeverage(int leverage,

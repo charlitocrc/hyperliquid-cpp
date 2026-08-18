@@ -8,24 +8,25 @@ docs (Info / Exchange / WebSocket endpoints) and cross-checked against the reque
 
 **Implemented today** (verified against source, not aspiration):
 
-- Info (42 request types): `allMids`, `clearinghouseState`, `spotClearinghouseState`, `openOrders`,
+- Info (43 request types): `allMids`, `clearinghouseState`, `spotClearinghouseState`, `openOrders`,
   `frontendOpenOrders`, `historicalOrders`, `orderStatus`, `l2Book`, `candleSnapshot`, `meta`,
   `metaAndAssetCtxs`, `spotMeta`, `spotMetaAndAssetCtxs`, `perpDexs`, `perpDeployAuctionStatus`,
   `userFills`, `userFillsByTime`, `userFunding`, `fundingHistory`, `userNonFundingLedgerUpdates`,
   `userFees`, `userRole`, `userRateLimit`, `userTwapSliceFills`, `userVaultEquities`, `vaultDetails`,
   `subAccounts`, `referral`, `portfolio`, `maxBuilderFee`, `approvedBuilders`, `userDexAbstraction`,
   `userAbstraction`, `perpDexLimits`, `perpDexStatus`, `tokenDetails`, `predictedFundings`,
-  `perpsAtOpenInterestCap`, `perpCategories`, `perpConciseAnnotations`, `perpAnnotation`
-- Exchange (23 actions): `order`, `cancel`, `cancelByCloid`, `modify`, `batchModify`, `scheduleCancel`,
+  `perpsAtOpenInterestCap`, `perpCategories`, `perpConciseAnnotations`, `perpAnnotation`,
+  `userToMultiSigSigners`
+- Exchange (25 actions): `order`, `cancel`, `cancelByCloid`, `modify`, `batchModify`, `scheduleCancel`,
   `updateLeverage`, `updateIsolatedMargin`, `topUpIsolatedOnlyMargin`, `usdSend`, `spotSend`,
   `usdClassTransfer`, `sendAsset`, `twapOrder`, `twapCancel`, `reserveRequestWeight`,
   `approveBuilderFee`, `approveAgent`, `noop`, `setReferrer`, `createSubAccount`, `subAccountTransfer`,
-  `subAccountSpotTransfer`
+  `subAccountSpotTransfer`, `convertToMultiSigUser`, `multiSig`
 - Market orders (`marketOpen` / `marketClose`), EIP-712 signing, ECDSA secp256k1 wallet,
   automatic tick/lot rounding, `setExpiresAfter`
-- 20 working examples in `examples/` (one needs BUILD_WEBSOCKET)
+- 21 working examples in `examples/` (one needs BUILD_WEBSOCKET)
 
-**Not implemented at all:** staking, borrow/lend, vaults, multi-sig, token/perp deployment,
+**Not implemented at all:** staking, borrow/lend, vaults, token/perp deployment,
 prediction-market outcomes.
 
 ---
@@ -398,7 +399,9 @@ the tier for a given notional. Callers do the lookup themselves.
 - [ ] `extraAgents()` - agent names, addresses, validity timestamps. Distinct from the
       already-implemented `approvedBuilders()`.
 - [ ] `alignedQuoteTokenInfo()` - isAligned, firstAlignedTime, evmMintedSupply, dailyAmountOwed
-- [ ] `queryUserToMultiSigSigners()`
+- [x] `queryUserToMultiSigSigners()` - `userToMultiSigSigners`; the account's authorized
+      users and threshold. Returns **null** for an address that is not a multi-sig account
+      (verified live), which is how the multi-sig example checks before signing anything.
 
 ---
 
@@ -414,11 +417,58 @@ the tier for a given notional. Callers do the lookup themselves.
 
 ## Low Priority - Specialized Features
 
-### Multi-Signature
+### Multi-Signature — DONE
 
-- [ ] `convertToMultiSigUser()`, `multiSig()`
-- [ ] `signMultiSigAction()`, `signMultiSigUserSignedActionPayload()`,
+The docs describe the workflow but publish no wire format, deferring to the Python SDK, so
+this follows Python's signing byte for byte. Every signature is pinned against it in
+`tests/multi_sig_test.cpp` — the payloads are assembled from pieces (an enriched type list,
+an array envelope, a hash of a hash) that a shape-only test would accept while the exchange
+rejects them.
+
+- [x] `convertToMultiSigUser()` - action `convertToMultiSigUser`; wire
+      `{type, signers, nonce}` where `signers` is a JSON *string*. User-signed
+      (`HyperliquidTransaction:ConvertToMultiSigUser`).
+- [x] `multiSig()` - action `multiSig`; wire `{type, signatureChainId, signatures,
+      payload: {multiSigUser, outerSigner, action}}`. Takes the inner action as
+      `ordered_json`, since its key order feeds the msgpack hash.
+- [x] `signMultiSigAction()`, `signMultiSigUserSignedActionPayload()`,
       `signMultiSigL1ActionPayload()`, `addMultiSigTypes()`, `addMultiSigFields()`
+- [x] `convertToMultiSigUserSigners()` - builds the `signers` string. No Python equivalent;
+      it exists because changing an existing signer set has to be hand-assembled as an inner
+      action, and the string's exact bytes are what gets signed.
+- [x] Example in `examples/multi_sig.cpp` (L1 and user-signed inner actions, signer-set
+      changes, converting back to a normal user)
+
+Deliberate divergences from the Python SDK, each one a case where mirroring it produces a
+signature the exchange cannot verify:
+
+- **The vault comes from one place.** Python's `multi_sig()` signs over a `vault_address`
+  argument but ships the Exchange's configured vault in the envelope; when they differ the
+  signature covers a vault the request does not carry. Ours signs and sends the configured
+  vault, like every other action, so the argument is gone.
+- **`addMultiSigTypes()` throws** when the types carry no `hyperliquidChain` entry. Python
+  prints a warning and returns them unchanged, producing a well-formed signature that
+  verifies against nothing and fails much later as a rejected action.
+- **`convertToMultiSigUser()` validates** before spending a request: at most 10 authorized
+  users (the documented cap), threshold within `[1, users]`, no duplicates, addresses
+  well-formed. A threshold above the number of distinct signers leaves an account that can
+  never sign again.
+
+The `signers` string is built by hand rather than with `json::dump()`, to reproduce Python's
+`json.dumps` spacing exactly (`{"authorizedUsers": ["0x..", "0x.."], "threshold": 2}`). It is
+signed as an opaque string, so the bytes are the contract.
+
+Two things the caller still owns, both documented on `multiSig()`:
+
+- A **user-signed** inner action must carry its own `signatureChainId` and `hyperliquidChain`.
+  Nothing adds them on this path — `signMultiSigUserSignedActionPayload()` deliberately does
+  not mutate the action, because the leader hashes the same object afterwards.
+- The nonce, vault and `expiresAfter` must be identical across every signer and the leader.
+
+Not ported: Python's `_multi_sig_payload_action`, which rewrites a `userSetAbstraction`
+inner action's `abstraction` field to its wire enum. This SDK has no `userSetAbstraction`
+yet, and silently rewriting a caller-supplied action would be worse than not having it.
+Revisit when the Abstraction actions land.
 
 ### Spot Token Deployment (10 actions)
 
@@ -551,7 +601,7 @@ the tier for a given notional. Callers do the lookup themselves.
 | Dex Abstraction | ✅ | ⚠️ | Read-only (queries done, actions missing) |
 | Staking | ✅ | ❌ | TODO |
 | Prediction Markets / Outcomes | ✅ | ❌ | TODO |
-| Multi-Sig | ✅ | ❌ | TODO |
+| Multi-Sig | ✅ | ✅ | Complete |
 | Token / Perp Deployment | ✅ | ❌ | TODO |
 | Validators | ✅ | ❌ | TODO |
 
@@ -575,7 +625,7 @@ Staking, borrow/lend, prediction-market outcomes, the newly-documented perp quer
 (`predictedFundings`, `allPerpMetas`, `perpDexLimits`, annotations), margin-table modeling.
 
 ### Phase 5: Specialized
-Multi-sig, validators, token/perp deployment.
+~~Multi-sig~~ done. Still open: validators, token/perp deployment.
 
 ### Phase 6: Production Readiness
 Tests, CI, packaging, docs, cross-platform.
@@ -607,6 +657,6 @@ Tests, CI, packaging, docs, cross-platform.
 
 ---
 
-**Last Updated**: 2026-07-28
+**Last Updated**: 2026-08-18
 **Rebuilt from**: Hyperliquid docs (Info, Exchange, WebSocket endpoints) via MCP
 **C++ SDK Version**: 1.0.0

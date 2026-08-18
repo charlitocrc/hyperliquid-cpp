@@ -592,6 +592,14 @@ nlohmann::json Info::approvedBuilders(const std::string& user) {
     return post("/info", payload);
 }
 
+nlohmann::json Info::queryUserToMultiSigSigners(const std::string& multi_sig_user) {
+    nlohmann::json payload = {
+        {"type", "userToMultiSigSigners"},
+        {"user", multi_sig_user}
+    };
+    return post("/info", payload);
+}
+
 nlohmann::json Info::userRole(const std::string& user) {
     nlohmann::json payload = {
         {"type", "userRole"},

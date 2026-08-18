@@ -7,6 +7,7 @@ set(TESTS
     approve_builder_fee_test
     approve_agent_test
     l1_action_signing_test
+    multi_sig_test
     spot_token_index_test
 )
 

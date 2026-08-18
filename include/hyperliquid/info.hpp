@@ -408,6 +408,17 @@ public:
     nlohmann::json approvedBuilders(const std::string& user);
 
     /**
+     * Query the authorized users and signature threshold of a multi-sig account.
+     *
+     * @param multi_sig_user Address in 42-character hexadecimal format
+     * @return null when the address is not a multi-sig account (verified live).
+     *         Otherwise the account's signer set, mirroring the "signers" field
+     *         of the convertToMultiSigUser action:
+     *         {authorizedUsers: ["0x...", ...], threshold: int}
+     */
+    nlohmann::json queryUserToMultiSigSigners(const std::string& multi_sig_user);
+
+    /**
      * Query role and account type for a user
      *
      * @param user Address in 42-character hexadecimal format
