@@ -21,6 +21,7 @@ set(EXAMPLES
     sub_accounts
     multi_sig
     staking_lending_and_outcomes
+    staking_actions
     dex_and_token_info
 )
 

@@ -299,6 +299,59 @@ public:
                                          double amount);
 
     /**
+     * Move HYPE from the spot balance into the staking balance.
+     *
+     * Staking is two steps: this puts HYPE into the staking balance, where it
+     * still earns nothing, and tokenDelegate() then assigns it to a validator.
+     * info_.userStakingSummary() reports the two halves as `undelegated` and
+     * `delegated`.
+     *
+     * User-signed action (EIP-712, HyperliquidTransaction:CDeposit), so it
+     * carries its own nonce and no vaultAddress field.
+     *
+     * @param wei Amount in wei. HYPE has 8 decimals, so 1 HYPE = 100000000
+     *            wei. Must be positive.
+     */
+    nlohmann::json cDeposit(uint64_t wei);
+
+    /**
+     * Move HYPE from the staking balance back to the spot balance.
+     *
+     * Goes through a 7-day unstaking queue: the amount leaves the staking
+     * balance at once and lands in spot 7 days later, showing up as a pending
+     * withdrawal in info_.userStakingSummary() in between. Only undelegated
+     * stake can be withdrawn, so undelegate first and wait out the 1-day
+     * delegation lockup.
+     *
+     * User-signed action (EIP-712, HyperliquidTransaction:CWithdraw).
+     *
+     * @param wei Amount in wei (1 HYPE = 100000000). Must be positive.
+     */
+    nlohmann::json cWithdraw(uint64_t wei);
+
+    /**
+     * Delegate staked HYPE to a validator, or undelegate it.
+     *
+     * Only stake already in the staking balance (see cDeposit()) can be
+     * delegated. Each delegation locks for 1 day, counted from the most recent
+     * delegation to that validator, so topping one up restarts its lockup;
+     * info_.userStakingDelegations() reports the per-validator
+     * lockedUntilTimestamp.
+     *
+     * Delegating to a validator that gets jailed earns nothing, so pick one
+     * deliberately rather than by yield alone.
+     *
+     * User-signed action (EIP-712, HyperliquidTransaction:TokenDelegate).
+     *
+     * @param validator Validator address (42-char hex), lowercased here
+     * @param wei Amount in wei (1 HYPE = 100000000). Must be positive.
+     * @param is_undelegate true takes stake back from the validator
+     */
+    nlohmann::json tokenDelegate(const std::string& validator,
+                                uint64_t wei,
+                                bool is_undelegate);
+
+    /**
      * Convert this account into a multi-sig account: from here on, every one
      * of its actions must arrive wrapped in multiSig(), signed by at least
      * `threshold` of the authorized users.

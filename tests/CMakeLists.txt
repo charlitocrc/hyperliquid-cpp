@@ -10,6 +10,7 @@ set(TESTS
     l1_action_signing_test
     multi_sig_test
     spot_token_index_test
+    staking_actions_test
 )
 
 if(BUILD_WEBSOCKET)

@@ -14,7 +14,7 @@ A C++ SDK for interacting with the Hyperliquid decentralized exchange, supportin
 - ✅ Transfer USD and spot tokens
 - ✅ Leverage management
 - ✅ Multi-signature accounts
-- ✅ Staking, borrow/lend and prediction-market queries
+- ✅ Staking: deposit, withdraw, delegate, plus borrow/lend and prediction-market queries
 - ✅ Full EIP-712 signing support
 - ✅ Testnet and Mainnet support
 
@@ -368,6 +368,36 @@ nlohmann::json sendAsset(const std::string& destination,
                         double amount);
 ```
 
+#### Sub-Accounts
+
+```cpp
+// Create a sub-account; the response carries its address.
+nlohmann::json createSubAccount(const std::string& name);
+
+// Move perp USDC in (is_deposit=true) or out; usd is in micro-USDC.
+nlohmann::json subAccountTransfer(const std::string& sub_account_user,
+                                 bool is_deposit,
+                                 int64_t usd);
+
+// Spot counterpart; token is "NAME:0x..." as returned by spotMeta().
+nlohmann::json subAccountSpotTransfer(const std::string& sub_account_user,
+                                     bool is_deposit,
+                                     const std::string& token,
+                                     double amount);
+
+// Read side: the master account's sub-accounts and their state.
+nlohmann::json querySubAccounts(const std::string& user);
+```
+
+These act on the master account, so they are signed by the account's own wallet
+and ignore any vault/subaccount configured on the `Exchange`. Same for
+`setReferrer()`:
+
+```cpp
+// One shot per account, and only before it has traded.
+nlohmann::json setReferrer(const std::string& code);
+```
+
 #### Agents
 
 ```cpp
@@ -409,6 +439,28 @@ nlohmann::json updateIsolatedMargin(double amount, const std::string& coin);
 // The exchange computes the margin to add; this never removes margin.
 nlohmann::json topUpIsolatedOnlyMargin(const std::string& coin, double leverage);
 ```
+
+#### Staking
+
+```cpp
+// Move HYPE from the spot balance into the staking balance. Amounts are wei;
+// HYPE has 8 decimals, so 1 HYPE = 100000000 wei.
+nlohmann::json cDeposit(uint64_t wei);
+
+// Back to spot. Goes through a 7-day unstaking queue.
+nlohmann::json cWithdraw(uint64_t wei);
+
+// Assign staked HYPE to a validator, or take it back. 1-day lockup per
+// validator, restarted by each top-up.
+nlohmann::json tokenDelegate(const std::string& validator,
+                            uint64_t wei,
+                            bool is_undelegate);
+```
+
+Staking is two steps and neither alone earns anything: `cDeposit()` fills the
+staking balance, `tokenDelegate()` puts it to work. Read the two halves back
+with `info_.userStakingSummary()` (`undelegated` / `delegated`) and
+`info_.userStakingDelegations()`. See `examples/staking_actions.cpp`.
 
 #### Multi-Signature
 

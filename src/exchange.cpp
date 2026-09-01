@@ -724,6 +724,88 @@ nlohmann::json Exchange::subAccountSpotTransfer(const std::string& sub_account_u
     return postL1Action(action);
 }
 
+// Staking. All three are user-signed, so each carries its own nonce and no
+// vaultAddress field. The docs publish the action bodies but not the EIP-712
+// type lists; for every user-signed action the list is the action's fields
+// minus "type" and "signatureChainId", with "hyperliquidChain" prepended,
+// which is what the shipped seven and the Python SDK's tokenDelegate all do.
+static nlohmann::json stakingBalanceAction(const char* type, uint64_t wei) {
+    if (wei == 0) {
+        throw std::invalid_argument(std::string(type) + " wei must be positive");
+    }
+
+    return nlohmann::json{
+        {"type", type},
+        {"wei", wei},
+        {"nonce", getTimestampMs()}
+    };
+}
+
+nlohmann::json Exchange::cDeposit(uint64_t wei) {
+    auto action = stakingBalanceAction("cDeposit", wei);
+
+    std::vector<EIP712Type> payload_types = {
+        {"hyperliquidChain", "string"},
+        {"wei", "uint64"},
+        {"nonce", "uint64"}
+    };
+
+    bool is_mainnet = (base_url_ == MAINNET_API_URL);
+    auto signature = signUserSignedAction(*wallet_, action, payload_types,
+                                         "HyperliquidTransaction:CDeposit",
+                                         is_mainnet);
+
+    return postAction(action, signature, action["nonce"]);
+}
+
+nlohmann::json Exchange::cWithdraw(uint64_t wei) {
+    auto action = stakingBalanceAction("cWithdraw", wei);
+
+    std::vector<EIP712Type> payload_types = {
+        {"hyperliquidChain", "string"},
+        {"wei", "uint64"},
+        {"nonce", "uint64"}
+    };
+
+    bool is_mainnet = (base_url_ == MAINNET_API_URL);
+    auto signature = signUserSignedAction(*wallet_, action, payload_types,
+                                         "HyperliquidTransaction:CWithdraw",
+                                         is_mainnet);
+
+    return postAction(action, signature, action["nonce"]);
+}
+
+nlohmann::json Exchange::tokenDelegate(const std::string& validator,
+                                       uint64_t wei,
+                                       bool is_undelegate) {
+    if (wei == 0) {
+        throw std::invalid_argument("tokenDelegate wei must be positive");
+    }
+
+    nlohmann::json action = {
+        {"type", "tokenDelegate"},
+        {"validator", normalizeAddress(validator)},
+        {"wei", wei},
+        {"isUndelegate", is_undelegate},
+        {"nonce", getTimestampMs()}
+    };
+
+    std::vector<EIP712Type> payload_types = {
+        {"hyperliquidChain", "string"},
+        {"validator", "address"},
+        {"wei", "uint64"},
+        {"isUndelegate", "bool"},
+        {"nonce", "uint64"}
+    };
+
+    bool is_mainnet = (base_url_ == MAINNET_API_URL);
+    auto signature = signUserSignedAction(*wallet_, action, payload_types,
+                                         "HyperliquidTransaction:TokenDelegate",
+                                         is_mainnet);
+
+    return postAction(action, signature, action["nonce"]);
+}
+
 nlohmann::json Exchange::noop(std::optional<int64_t> nonce) {
     nlohmann::ordered_json action;
     action["type"] = "noop";
