@@ -551,6 +551,12 @@ public:
      *         [0]: SpotMeta {tokens, universe}
      *         [1]: Array of spot asset contexts:
      *              {dayNtlVlm, markPx, midPx, prevDayPx, circulatingSupply, coin}
+     *
+     * [1] is NOT parallel to [0].universe: it is indexed by pair index and
+     * covers every pair ever deployed, while universe is a subset of those
+     * (718 contexts against 326 pairs on mainnet today). Key contexts by
+     * their own "coin" field; zipping the two arrays silently pairs a market
+     * with another market's prices.
      */
     nlohmann::json spotMetaAndAssetCtxs();
 
@@ -865,6 +871,8 @@ private:
                            const std::vector<std::string>* perp_dexs);
 
     void setPerpMeta(const Meta& meta, int offset);
+
+    void setSpotMeta(const SpotMeta& spot_meta);
 
 #ifdef HYPERLIQUID_WEBSOCKET
     /** Returns the manager, or throws if this Info was built with skip_ws. */

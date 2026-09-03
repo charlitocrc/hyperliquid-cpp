@@ -92,55 +92,7 @@ void Info::initializeMetadata(const Meta* meta,
         spot_meta_obj = spotMeta();
     }
 
-    // A pair's "tokens" are token *ids*, not positions in the tokens array.
-    // The two coincide for the first few hundred tokens and then stop: on
-    // mainnet 21 tokens have index != position, and pairs reference ids past
-    // the end of the array entirely (max id 852 against 479 tokens). Indexing
-    // positionally therefore read out of bounds for 18 mainnet pairs and
-    // silently picked the wrong token for others, giving that pair the wrong
-    // szDecimals and so the wrong tick/lot rounding.
-    //
-    // Keyed lookup, as the Python SDK does (info.py: token_by_index).
-    std::unordered_map<int, const SpotTokenInfo*> token_by_index;
-    token_by_index.reserve(spot_meta_obj.tokens.size());
-    for (const auto& token : spot_meta_obj.tokens) {
-        token_by_index[token.index] = &token;
-    }
-
-    auto require_token = [&](int token_id, const std::string& pair_name) -> const SpotTokenInfo& {
-        auto it = token_by_index.find(token_id);
-        if (it == token_by_index.end()) {
-            throw Error("spot pair " + pair_name + " references unknown token id " +
-                        std::to_string(token_id) + "; spot metadata is inconsistent");
-        }
-        return *it->second;
-    };
-
-    // Add spot pairs (matches Python SDK logic)
-    for (const auto& pair : spot_meta_obj.universe) {
-        int asset = 10000 + pair.index;
-
-        // Register pair name (e.g., "@107")
-        coin_to_asset_[pair.name] = asset;
-        name_to_coin_[pair.name] = pair.name;
-
-        // Python unpacks exactly two ids here and would raise otherwise.
-        if (pair.tokens.size() < 2) {
-            throw Error("spot pair " + pair.name + " has fewer than two tokens");
-        }
-
-        const auto& base_token = require_token(pair.tokens[0], pair.name);
-        const auto& quote_token = require_token(pair.tokens[1], pair.name);
-
-        // Set sz_decimals to the BASE token's sz_decimals (critical for tick/lot size)
-        asset_to_sz_decimals_[asset] = base_token.sz_decimals;
-
-        // Also register by "BASE/QUOTE" name format
-        std::string pair_format = base_token.name + "/" + quote_token.name;
-        if (name_to_coin_.find(pair_format) == name_to_coin_.end()) {
-            name_to_coin_[pair_format] = pair.name;
-        }
-    }
+    setSpotMeta(spot_meta_obj);
 
     // Auto-fetch perp metadata if not provided (matches Python SDK behavior)
     std::vector<std::string> dexs;
@@ -170,6 +122,58 @@ void Info::initializeMetadata(const Meta* meta,
     }
 }
 
+void Info::setSpotMeta(const SpotMeta& spot_meta) {
+    // A pair's "tokens" are token *ids*, not positions in the tokens array.
+    // The two coincide for the first few hundred tokens and then stop: on
+    // mainnet today 41 tokens sit at a position != their id, and 21 pairs
+    // reference ids past the end of the array (max id 872, 499 tokens). Those
+    // counts drift as tokens are listed; the invariant does not. Subscripting
+    // read out of bounds, or silently picked another token and gave the pair
+    // its szDecimals, so the wrong tick/lot rounding.
+    //
+    // Keyed lookup, as the Python SDK does (info.py: token_by_index).
+    std::unordered_map<int, const SpotTokenInfo*> token_by_index;
+    token_by_index.reserve(spot_meta.tokens.size());
+    for (const auto& token : spot_meta.tokens) {
+        token_by_index[token.index] = &token;
+    }
+
+    auto require_token = [&](int token_id, const std::string& pair_name) -> const SpotTokenInfo& {
+        auto it = token_by_index.find(token_id);
+        if (it == token_by_index.end()) {
+            throw Error("spot pair " + pair_name + " references unknown token id " +
+                        std::to_string(token_id) + "; spot metadata is inconsistent");
+        }
+        return *it->second;
+    };
+
+    // Add spot pairs (matches Python SDK logic)
+    for (const auto& pair : spot_meta.universe) {
+        int asset = 10000 + pair.index;
+
+        // Register pair name (e.g., "@107")
+        coin_to_asset_[pair.name] = asset;
+        name_to_coin_[pair.name] = pair.name;
+
+        // Python unpacks exactly two ids here and would raise otherwise.
+        if (pair.tokens.size() < 2) {
+            throw Error("spot pair " + pair.name + " has fewer than two tokens");
+        }
+
+        const auto& base_token = require_token(pair.tokens[0], pair.name);
+        const auto& quote_token = require_token(pair.tokens[1], pair.name);
+
+        // Set sz_decimals to the BASE token's sz_decimals (critical for tick/lot size)
+        asset_to_sz_decimals_[asset] = base_token.sz_decimals;
+
+        // Also register by "BASE/QUOTE" name format
+        std::string pair_format = base_token.name + "/" + quote_token.name;
+        if (name_to_coin_.find(pair_format) == name_to_coin_.end()) {
+            name_to_coin_[pair_format] = pair.name;
+        }
+    }
+}
+
 void Info::setPerpMeta(const Meta& meta, int offset) {
     for (size_t i = 0; i < meta.universe.size(); ++i) {
         const auto& asset = meta.universe[i];
@@ -186,29 +190,7 @@ void Info::registerPerpMeta(const Meta& meta, int offset) {
 }
 
 void Info::registerSpotMeta(const SpotMeta& spot_meta) {
-    // Add spot pairs (matches Python SDK logic)
-    for (const auto& pair : spot_meta.universe) {
-        int asset = 10000 + pair.index;
-
-        // Register pair name (e.g., "@107")
-        coin_to_asset_[pair.name] = asset;
-        name_to_coin_[pair.name] = pair.name;
-
-        // Get base and quote token info
-        int base_idx = pair.tokens[0];
-        int quote_idx = pair.tokens[1];
-        const auto& base_token = spot_meta.tokens[base_idx];
-        const auto& quote_token = spot_meta.tokens[quote_idx];
-
-        // Set sz_decimals to the BASE token's sz_decimals (critical for tick/lot size)
-        asset_to_sz_decimals_[asset] = base_token.sz_decimals;
-
-        // Also register by "BASE/QUOTE" name format
-        std::string pair_format = base_token.name + "/" + quote_token.name;
-        if (name_to_coin_.find(pair_format) == name_to_coin_.end()) {
-            name_to_coin_[pair_format] = pair.name;
-        }
-    }
+    setSpotMeta(spot_meta);
 }
 
 int Info::nameToAsset(const std::string& name) const {

@@ -1,12 +1,12 @@
 // A spot pair's "tokens" field holds token *ids*, not positions in the tokens
 // array. The two agree for the first few hundred tokens and then diverge: on
-// live mainnet 21 tokens have index != position, and pairs reference ids past
-// the end of the array entirely (max id 852 against 479 tokens).
+// live mainnet 41 tokens have index != position, and pairs reference ids past
+// the end of the array entirely (max id 872 against 499 tokens).
 //
-// Indexing positionally therefore read out of bounds for 18 mainnet pairs and
-// 55 testnet pairs, and silently resolved the wrong token for 31 more on
-// testnet -- giving those pairs another token's szDecimals, and so the wrong
-// tick/lot rounding on every order for them.
+// Indexing positionally therefore read out of bounds for 21 mainnet pairs, and
+// silently resolved the wrong token for others -- giving those pairs another
+// token's szDecimals, and so the wrong tick/lot rounding on every order for
+// them.
 //
 // The fixture below reproduces both shapes with a handful of tokens.
 
@@ -114,12 +114,26 @@ void unknownTokenIdThrows() {
     assert(threw);
 }
 
+// registerSpotMeta is the public way in for callers who supply their own
+// metadata; it must resolve ids the same way the constructor does.
+void registerSpotMetaResolvesById() {
+    const SpotMeta empty_spot_meta{};
+    Info info = makeInfo(empty_spot_meta);
+
+    info.registerSpotMeta(sparseSpotMeta());
+
+    assert(info.asset_to_sz_decimals_.at(info.nameToAsset("@1")) == 4);
+    assert(info.nameToCoin("FAR/USDC") == "@1");
+    assert(info.asset_to_sz_decimals_.at(info.nameToAsset("@2")) == 3);
+}
+
 }  // namespace
 
 int main() {
     outOfRangeTokenIdResolves();
     inRangeButMisalignedTokenIdResolves();
     unknownTokenIdThrows();
+    registerSpotMetaResolvesById();
 
     return 0;
 }
