@@ -1,7 +1,11 @@
 #include "hyperliquid/api.hpp"
 #include "hyperliquid/errors.hpp"
 #include "hyperliquid/utils/constants.hpp"
+#ifdef HYPERLIQUID_WEBSOCKET
+#include "hyperliquid/websocket_manager.hpp"
+#endif
 #include <curl/curl.h>
+#include <chrono>
 #include <algorithm>
 #include <mutex>
 #include <stdexcept>
@@ -121,6 +125,31 @@ void API::handleException(long response_code, const std::string& response_body) 
 }
 
 nlohmann::json API::post(const std::string& url_path, const nlohmann::json& payload) {
+#ifdef HYPERLIQUID_WEBSOCKET
+    // A pure transport swap: the websocket post envelope wraps exactly the body
+    // an HTTP request would carry, and unwraps to exactly the body it would
+    // return. So the two endpoints map straight onto the envelope's request
+    // types, and every method built on post() works over either transport
+    // without knowing which one it got.
+    if (ws_transport_) {
+        const char* request_type = url_path == "/info"     ? "info"
+                                 : url_path == "/exchange" ? "action"
+                                                           : nullptr;
+        // Anything else -- /explorer -- the server does not accept over the
+        // socket, so it stays on HTTP.
+        if (request_type) {
+            // nullopt means the socket is down or still connecting. The curl
+            // connection is open and warm either way, so a reconnect blip costs
+            // latency rather than a failed order.
+            auto response = ws_transport_->tryPost(request_type, payload,
+                                                   std::chrono::milliseconds(timeout_ms_));
+            if (response) {
+                return std::move(*response);
+            }
+        }
+    }
+#endif
+
     const std::string url = base_url_ + url_path;
     const std::string json_str = payload.dump();
     std::string response_body;

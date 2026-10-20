@@ -11,7 +11,10 @@
 #include <cctype>
 #include <chrono>
 #include <cstdint>
+#include <exception>
+#include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace hyperliquid {
@@ -291,7 +294,118 @@ std::optional<std::string> inflateRaw(const std::vector<unsigned char>& compress
     return inflated;
 }
 
+/**
+ * Raise the exception an error response maps to.
+ *
+ * The server sends the HTTP status line it would have returned, e.g.
+ * "422 Unprocessable Entity: Failed to deserialize the JSON body...". Parsing
+ * the code back out is what lets one catch(ClientError) cover both transports.
+ * Text with no leading status -- the id-less rejections, which read as prose --
+ * becomes a plain Error carrying the whole message.
+ */
+[[noreturn]] void throwPostError(const std::string& text) {
+    std::size_t digits = 0;
+    while (digits < text.size() && std::isdigit(static_cast<unsigned char>(text[digits]))) {
+        ++digits;
+    }
+    // Three digits exactly: a longer run is a number that happens to start the
+    // message, not a status code.
+    if (digits != 3) {
+        throw Error(text);
+    }
+
+    const int status = std::stoi(text.substr(0, digits));
+    // "422 Unprocessable Entity: <message>" splits into reason and message the
+    // same way the HTTP path splits its JSON error into code and message.
+    std::string reason = text.substr(digits);
+    std::string message = text;
+    const auto separator = reason.find(": ");
+    if (separator != std::string::npos) {
+        message = reason.substr(separator + 2);
+        reason = reason.substr(0, separator);
+    }
+    // Trim the space between the code and the reason phrase.
+    const auto first = reason.find_first_not_of(' ');
+    reason = first == std::string::npos ? std::string{} : reason.substr(first);
+
+    if (status >= 400 && status < 500) {
+        throw ClientError(status, reason, message);
+    }
+    if (status >= 500) {
+        throw ServerError(status, message);
+    }
+    throw Error(text);
+}
+
+/** Store an exception in a promise whose value nobody will ever set. */
+void failPromise(std::promise<json>& promise, const std::string& message) {
+    try {
+        promise.set_exception(std::make_exception_ptr(Error(message)));
+    } catch (const std::future_error&) {
+        // Already fulfilled by a racing path. Nothing left to report.
+    }
+}
+
 } // namespace
+
+json unwrapPostResponse(const json& data) {
+    if (!data.is_object()) {
+        throw Error("websocket post response is not an object: " + data.dump());
+    }
+    const auto response = data.find("response");
+    if (response == data.end() || !response->is_object()) {
+        throw Error("websocket post response has no response object: " + data.dump());
+    }
+
+    const std::string type = response->value("type", std::string{});
+    const auto payload = response->find("payload");
+
+    if (type == "error") {
+        // Documented, but never observed on mainnet: the rejections seen in
+        // practice arrive on the error channel instead, which is why
+        // failPostFromErrorText() exists. Handled anyway, per the docs.
+        if (payload != response->end()) {
+            throwPostError(payload->is_string() ? payload->get<std::string>() : payload->dump());
+        }
+        throwPostError(data.dump());
+    }
+    if (payload == response->end()) {
+        throw Error("websocket post response has no payload: " + data.dump());
+    }
+    if (type == "info") {
+        // The info envelope. Absent only if the server ever stops sending it,
+        // in which case the payload already is the HTTP body.
+        const auto inner = payload->find("data");
+        if (inner != payload->end()) {
+            return *inner;
+        }
+    }
+    return *payload;
+}
+
+std::optional<int> postIdFromErrorText(const std::string& text) {
+    const auto key = text.find("\"id\"");
+    if (key == std::string::npos) {
+        return std::nullopt;
+    }
+    std::size_t cursor = key + 4;
+    while (cursor < text.size() &&
+           (text[cursor] == ':' || std::isspace(static_cast<unsigned char>(text[cursor])))) {
+        ++cursor;
+    }
+    const std::size_t start = cursor;
+    while (cursor < text.size() && std::isdigit(static_cast<unsigned char>(text[cursor]))) {
+        ++cursor;
+    }
+    if (cursor == start) {
+        return std::nullopt;
+    }
+    try {
+        return std::stoi(text.substr(start, cursor - start));
+    } catch (const std::exception&) {
+        return std::nullopt;  // out of int range: not an id this manager issued
+    }
+}
 
 std::optional<json> decodeFastAssetCtxs(const std::string& encoded) {
     const auto compressed = base64Decode(encoded);
@@ -378,6 +492,10 @@ WebSocketManager::WebSocketManager(const std::string& base_url) {
     ws_ = std::make_unique<ix::WebSocket>();
     ws_->setUrl(ws_url_);
     ws_->setOnMessageCallback([this](const ix::WebSocketMessagePtr& msg) {
+        // Cheap and idempotent: IXWebSocket delivers every callback on one
+        // thread, and tryPost() needs to recognise it to refuse to block on it.
+        ws_thread_id_.store(std::this_thread::get_id(), std::memory_order_relaxed);
+
         switch (msg->type) {
         case ix::WebSocketMessageType::Open:
             onOpen();
@@ -385,6 +503,9 @@ WebSocketManager::WebSocketManager(const std::string& base_url) {
         case ix::WebSocketMessageType::Close:
         case ix::WebSocketMessageType::Error:
             connected_.store(false, std::memory_order_relaxed);
+            // A reconnect starts a fresh session and the server forgets every
+            // id it was holding, so nothing outstanding can still be answered.
+            failAllPosts("websocket disconnected with a post request in flight");
             break;
         case ix::WebSocketMessageType::Message:
             onMessage(msg->str);
@@ -417,6 +538,8 @@ void WebSocketManager::stop() {
     }
     ws_->stop();
     connected_.store(false, std::memory_order_relaxed);
+    connect_cv_.notify_all();
+    failAllPosts("websocket stopped with a post request in flight");
 }
 
 void WebSocketManager::pingLoop() {
@@ -429,15 +552,28 @@ void WebSocketManager::pingLoop() {
         if (connected()) {
             send(json{{"method", "ping"}});
         }
+        // Piggybacked on the ping timer rather than given its own thread. A
+        // post can otherwise sit in the map forever: the server answers a
+        // request it could not deserialize with an id-less error, and
+        // failPostFromErrorText() only recovers the id while the wording holds.
+        failStalePosts();
     }
 }
 
-void WebSocketManager::send(const json& payload) {
-    ws_->send(payload.dump());  // ix::WebSocket::send is thread-safe
+bool WebSocketManager::send(const json& payload) {
+    // ix::WebSocket::send is thread-safe, and reports failure rather than
+    // throwing when the socket is not open.
+    return ws_->send(payload.dump()).success;
 }
 
 void WebSocketManager::onOpen() {
-    connected_.store(true, std::memory_order_relaxed);
+    {
+        // Held while the flag flips so waitUntilConnected() cannot check it,
+        // miss it, and then sleep through the notify.
+        std::lock_guard<std::mutex> lock(connect_mutex_);
+        connected_.store(true, std::memory_order_relaxed);
+    }
+    connect_cv_.notify_all();
 
     // The server keeps no record of subscriptions across connections, so an
     // open is always a full re-subscribe. This is why there is no separate
@@ -483,7 +619,22 @@ void WebSocketManager::onMessage(const std::string& text) {
         if (channel == "pong" || channel == "subscriptionResponse") {
             return;
         }
+        if (channel == "post") {
+            // Routed by id, not by subscription identifier: a post reply
+            // belongs to one caller rather than to a feed.
+            completePost(message.value("data", json::object()));
+            return;
+        }
         if (channel == "error") {
+            // A rejected post surfaces here rather than on the post channel, so
+            // give the waiting caller first refusal on the message. Only a
+            // genuinely unclaimed error is a subscription error.
+            const auto data = message.find("data");
+            if (data != message.end() && data->is_string() &&
+                failPostFromErrorText(data->get<std::string>())) {
+                return;
+            }
+
             Callback on_error;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -625,6 +776,169 @@ bool WebSocketManager::unsubscribe(const json& subscription, int subscription_id
         send(json{{"method", "unsubscribe"}, {"subscription", subscription}});
     }
     return removed;
+}
+
+std::future<json> WebSocketManager::post(const std::string& request_type,
+                                        const json& payload,
+                                        std::chrono::milliseconds deadline) {
+    int id = 0;
+    std::future<json> future;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        id = ++id_counter_;
+        PendingPost& pending = pending_posts_[id];
+        pending.deadline = std::chrono::steady_clock::now() + deadline;
+        future = pending.promise.get_future();
+    }
+
+    // Registered before sending, not after: the reply can arrive on the socket
+    // thread before this one gets back from send().
+    const bool sent = send(json{{"method", "post"},
+                                {"id", id},
+                                {"request", {{"type", request_type}, {"payload", payload}}}});
+    if (!sent) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        pending_posts_.erase(id);
+        throw Error("websocket post could not be sent; the connection is down");
+    }
+    return future;
+}
+
+std::optional<json> WebSocketManager::tryPost(const std::string& request_type,
+                                              const json& payload,
+                                              std::chrono::milliseconds timeout) {
+    if (onWebSocketThread()) {
+        throw Error("blocking websocket post() called from the websocket thread; "
+                    "the reply can only be delivered by that same thread. Use "
+                    "WebSocketManager::post() and wait for the future elsewhere.");
+    }
+    if (!connected()) {
+        return std::nullopt;  // caller falls back to HTTP
+    }
+
+    std::future<json> future;
+    try {
+        future = post(request_type, payload, timeout);
+    } catch (const Error&) {
+        // The socket dropped between the check above and the send. Nothing left
+        // the server, so another transport may still carry this request.
+        return std::nullopt;
+    }
+
+    if (future.wait_for(timeout) != std::future_status::ready) {
+        // Deliberately not a fallback to HTTP: this request did reach the
+        // server, and re-sending an action that may already have executed is
+        // worse than reporting the timeout.
+        throw Error("websocket post timed out after " + std::to_string(timeout.count()) + "ms");
+    }
+    return future.get();  // rethrows whatever unwrapPostResponse() raised
+}
+
+bool WebSocketManager::waitUntilConnected(std::chrono::milliseconds timeout) {
+    std::unique_lock<std::mutex> lock(connect_mutex_);
+    connect_cv_.wait_for(lock, timeout, [this] {
+        return connected() || stopping_.load(std::memory_order_relaxed);
+    });
+    return connected();
+}
+
+bool WebSocketManager::onWebSocketThread() const {
+    return ws_thread_id_.load(std::memory_order_relaxed) == std::this_thread::get_id();
+}
+
+void WebSocketManager::completePost(const json& data) {
+    const auto id = data.is_object() ? data.find("id") : data.end();
+    if (id == data.end() || !id->is_number_integer()) {
+        return;
+    }
+
+    std::promise<json> promise;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto pending = pending_posts_.find(id->get<int>());
+        if (pending == pending_posts_.end()) {
+            return;  // already swept, or an id this manager never issued
+        }
+        promise = std::move(pending->second.promise);
+        pending_posts_.erase(pending);
+    }
+
+    // Fulfilled with the lock released: this wakes the caller, which may go
+    // straight into another post() and take the lock again.
+    try {
+        promise.set_value(unwrapPostResponse(data));
+    } catch (...) {
+        try {
+            promise.set_exception(std::current_exception());
+        } catch (const std::future_error&) {
+            // set_value already succeeded; the throw came from somewhere else.
+        }
+    }
+}
+
+bool WebSocketManager::failPostFromErrorText(const std::string& text) {
+    const auto id = postIdFromErrorText(text);
+    if (!id) {
+        return false;
+    }
+
+    std::promise<json> promise;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto pending = pending_posts_.find(*id);
+        if (pending == pending_posts_.end()) {
+            // An id scanned out of an error for something else, e.g. a
+            // subscription error that happens to quote an "id". Not ours.
+            return false;
+        }
+        promise = std::move(pending->second.promise);
+        pending_posts_.erase(pending);
+    }
+
+    try {
+        throwPostError(text);
+    } catch (...) {
+        try {
+            promise.set_exception(std::current_exception());
+        } catch (const std::future_error&) {
+        }
+    }
+    return true;
+}
+
+void WebSocketManager::failStalePosts() {
+    std::vector<std::promise<json>> expired;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto now = std::chrono::steady_clock::now();
+        for (auto it = pending_posts_.begin(); it != pending_posts_.end();) {
+            if (it->second.deadline <= now) {
+                expired.push_back(std::move(it->second.promise));
+                it = pending_posts_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    for (auto& promise : expired) {
+        failPromise(promise, "websocket post expired with no response from the server");
+    }
+}
+
+void WebSocketManager::failAllPosts(const std::string& reason) {
+    std::vector<std::promise<json>> outstanding;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        outstanding.reserve(pending_posts_.size());
+        for (auto& [id, pending] : pending_posts_) {
+            (void)id;
+            outstanding.push_back(std::move(pending.promise));
+        }
+        pending_posts_.clear();
+    }
+    for (auto& promise : outstanding) {
+        failPromise(promise, reason);
+    }
 }
 
 void WebSocketManager::setErrorCallback(Callback callback) {

@@ -1,115 +1,65 @@
-# Hyperliquid C++ SDK - TODO List
+# Hyperliquid C++ SDK - TODO
 
 ## Feature Comparison Matrix
 
-| Category | Hyperliquid API | C++ SDK | Status |
-|----------|-----------------|---------|--------|
+| Category | Hyperliquid API | C++ SDK | Notes |
+|----------|-----------------|---------|-------|
 | **Core Trading** |
-| Limit / Market Orders | ✅ | ✅ | Complete |
-| Cancel / Modify / Bulk | ✅ | ✅ | Complete (`modifyOrder` routes through `batchModify`) |
-| Schedule Cancel | ✅ | ✅ | Complete |
-| TWAP Orders | ✅ | ✅ | Complete |
+| Limit / Market Orders | ✅ | ✅ | |
+| Cancel / Modify / Bulk | ✅ | ✅ | by oid or cloid |
+| Schedule Cancel | ✅ | ✅ | |
+| TWAP Orders | ✅ | ✅ | |
 | **Account** |
-| Leverage / Isolated Margin | ✅ | ✅ | Complete |
-| Transfers (USD/Spot) | ✅ | ✅ | Complete |
-| USD Class Transfer | ✅ | ✅ | Complete |
-| Vault Transfers | ✅ | ❌ | TODO |
-| Sub-Accounts | ✅ | ✅ | Complete (create + USD/spot transfer; master-signed, vault excluded) |
-| Bridge Withdrawal | ✅ | ❌ | TODO |
+| Leverage / Isolated Margin | ✅ | ✅ | |
+| Transfers (USD / Spot / Class / `sendAsset`) | ✅ | ✅ | |
+| Vault Transfers | ✅ | ✅ | takes plain USD, not the Python SDK's wire int |
+| Sub-Accounts | ✅ | ✅ | |
+| Bridge Withdrawal | ✅ | ✅ | |
 | **Market Data** |
-| User / Spot State | ✅ | ✅ | Complete |
-| Open + Historical Orders | ✅ | ✅ | Complete |
-| Fills (+ by time, TWAP slices) | ✅ | ✅ | Complete |
-| L2 Book | ✅ | ✅ | Complete |
-| Candles | ✅ | ✅ | Complete |
-| All Mids | ✅ | ✅ | Complete |
-| Funding History | ✅ | ✅ | Complete |
-| Predicted Fundings | ✅ | ✅ | Complete |
-| User Fees | ✅ | ✅ | Complete |
-| Portfolio | ✅ | ✅ | Complete |
-| Vault Details | ✅ | ✅ | Complete |
-| Token Details | ✅ | ✅ | Complete |
-| Perp Dex Limits / Status | ✅ | ✅ | Complete |
-| Margin Tables | ✅ | ✅ | Complete (parsed into `Meta`; no tier-lookup helper) |
-| Borrow/Lend | ✅ | ✅ | Complete (no HTTP action exists; writes are CoreWriter-only) |
+| State, Orders, Fills, Book, Candles, Mids | ✅ | ✅ | |
+| Funding, Fees, Portfolio, Vaults, Tokens | ✅ | ✅ | |
+| Perp Dex Limits / Status, Margin Tables | ✅ | ✅ | |
+| Borrow/Lend | ✅ | ✅ | read-only; writes are CoreWriter-only |
 | **Real-Time** |
-| WebSocket (24 subscriptions) | ✅ | ✅ | Complete (raw JSON callbacks; no typed structs) |
-| WebSocket POST requests | ✅ | ❌ | TODO |
+| WebSocket Subscriptions | ✅ | ✅ | 24 types, typed structs |
+| WebSocket POST Requests | ✅ | ✅ | |
 | **Advanced** |
-| Agents / Referrals / Builders | ✅ | ✅ | Complete (`approveAgent`, `approveBuilderFee`, `setReferrer` + read queries) |
-| Dex Abstraction | ✅ | ⚠️ | Read-only (queries done, actions missing) |
-| Staking | ✅ | ✅ | Complete (`cDeposit`, `cWithdraw`, `tokenDelegate` + read queries) |
-| Prediction Markets / Outcomes | ✅ | ⚠️ | Read-only (queries done, actions missing) |
-| Multi-Sig | ✅ | ✅ | Complete |
-| Token / Perp Deployment | ✅ | ❌ | TODO (14 `perpDeploy` variants, 12 `spotDeploy`, HIP-4 outcomes) |
-| Validators | ✅ | ❌ | TODO |
+| Agents / Referrals / Builders | ✅ | ✅ | |
+| Staking | ✅ | ✅ | |
+| Multi-Sig | ✅ | ✅ | |
+| Prediction Markets (HIP-4) | ✅ | ✅ | trading, `userOutcome`, deployer actions, queries |
+| Dex / User Abstraction | ✅ | ⚠️ | queries only |
+| Token / Perp Deployment | ✅ | ❌ | |
+| Validators | ✅ | ❌ | |
 
----
+## Missing
 
-## Pending Tasks
+### Exchange actions
+- [ ] `agentSendAsset()`, `sendToEvmWithData()`, `hip3LiquidatorTransfer()`, `claimRewards()`
+- [ ] `userDexAbstraction()`, `agentEnableDexAbstraction()`, `userSetAbstraction()`, `agentSetAbstraction()` (queries exist, actions don't)
+- [ ] `useBigBlocks()`, `gossipPriorityBid()` (Python SDK only)
+- [ ] `marketClose()` for spot/outcome balances (reads perp positions only)
+- [ ] Spot deploy (12 `spotDeploy` variants), perp deploy (14 `perpDeploy` variants)
+- [ ] Validator ops: `cValidator*`, `cSigner*` (Python SDK only), `authorizeAqav2Role()`
 
-### WebSocket
+### Info queries
+- [ ] `alignedQuoteTokenInfo()`: no request shape works yet
 
-- [ ] WebSocket POST requests — `{"method": "post", "id": n, "request": {"type": "info"|"action", "payload": {...}}}`. Explorer requests unsupported over WS.
-- [ ] Validate `WsUserEvent`'s funding/liquidation/nonUserCancel arms and most ledger delta variants against live data — only `fills`, `send`, `subAccountTransfer` observed so far.
+### Unverified against live data
+- [ ] Outcome tick: `roundOutcomePrice()` caps at 5 decimals (inferred from live books); test a 6-decimal price on testnet
+- [ ] Outcome deployer actions: key order pinned to docs only; needs one testnet deploy
+- [ ] `userOutcome` with a subaccount: sent with `vaultAddress`, unconfirmed
+- [ ] `outcomeMetaUpdates`: `outcomeSettled`/`outcomeCreated` confirmed live; `questionSettled`/`questionUpdated` unseen
+- [ ] `WsUserEvent`: only `fills`, `send`, `subAccountTransfer` seen live
+- [ ] User-signed actions (`withdraw3`, `usdSend`, `spotSend`) with a vault configured: does the exchange read `vaultAddress`?
 
-### Exchange Actions
+### Python SDK parity
+- [ ] Per-action signing helpers (`signUsdTransferAction()` etc.), `orderTypeToWire()`, `signInner()`
+- [ ] `recoverAgentOrUserFromL1Action()`, `recoverUserFromUserSignedAction()`, `floatToIntForHashing()`, `addressToBytes()`
+- [ ] `bulkModifyOrdersNew()`, `getDex()`, `remapCoinSubscription()`
 
-- [ ] `agentSendAsset()`
-- [ ] `sendToEvmWithData()` — HyperCore → HyperEVM with calldata
-- [ ] `withdraw3()` — bridge withdrawal
-- [ ] `vaultTransfer()` — deposit/withdraw from a vault
-- [ ] `hip3LiquidatorTransfer()` — deposit/withdraw from an HIP-3 DEX backstop liquidator
-- [ ] `claimRewards()`
-- [ ] `userDexAbstraction()`, `agentEnableDexAbstraction()`
-- [ ] `userSetAbstraction()` (`"unifiedAccount"`/`"portfolioMargin"`/`"disabled"`), `agentSetAbstraction()` (`"u"`/`"p"`/`"i"`)
-- [ ] `useBigBlocks()` — big-blocks mode
-- [ ] `gossipPriorityBid()` — Python SDK only, no public doc page
-
-### Info Queries
-
-- [ ] `userOutcome()` exchange action — split/merge outcome, merge question, negate outcome
-- [ ] `alignedQuoteTokenInfo()` — no request shape has worked on mainnet or testnet yet; retry once an aligned quote asset is deployed
-
-### Error Handling
-
-- [ ] Specific error codes per failure type
-- [ ] Rate-limit detection and backoff
-- [ ] Retry logic for transient failures
-- [ ] Better error messages with suggested fixes
-
-### Specialized Features
-
-- [ ] Spot Token Deployment (12 `spotDeploy` variants): `registerToken2`, `userGenesis`, `genesis`, `registerSpot`, `registerHyperliquidity`, `setDeployerTradingFeeShare`, `enableQuoteToken`, `enableAlignedQuoteToken`, `disableQuoteToken`, `disableAlignedQuoteToken`, `setTokenAnnotation`, `setDeployerLabel`
-- [ ] Prediction-Market Deployment (HIP-4): `activateOutcomeDeployer()`; `outcomeDeploy` variants `registerStandaloneOutcomeFromTemplate`, `registerQuestionFromTemplate`, `registerAndAssociateNamedOutcomeFromTemplate`, `settleOutcome`, `settleQuestion2`, `setSubDeployers`
-- [ ] Perp Deployment (14 `perpDeploy` variants): `registerAsset2`, `registerAsset`, `setOracle`, `setFundingMultipliers`, `setFundingInterestRates`, `setMarginTableIds`, `setMarginModes`, `setOpenInterestCaps`, `setDeployerFees`, `setPerpAnnotation`, `haltTrading`, `disableDex`, `setFeeRecipient`, `setSubDeployers`
-- [ ] Validator Operations: `cValidatorRegister()`, `cValidatorChangeProfile()`, `cValidatorUnregister()` (action `CValidatorAction`); `cSignerJailSelf()`, `cSignerUnjailSelf()` (action `CSignerAction`) — none have a public doc page, Python SDK only; plus `validatorL1Stream()`, `authorizeAqav2Role()`
-
-### Signing & Conversion Utilities
-
-- [ ] Per-action signing helpers: `signUsdTransferAction()`, `signSpotTransferAction()`, `signWithdrawFromBridgeAction()`, `signUsdClassTransferAction()`, `signSendAssetAction()`, `signUserDexAbstractionAction()`, `signUserSetAbstractionAction()`, `signConvertToMultiSigUserAction()`, `signAgent()`, `signApproveBuilderFee()`, `signTokenDelegateAction()`
-- [ ] `orderTypeToWire()`, `signInner()`
-- [ ] `recoverAgentOrUserFromL1Action()`, `recoverUserFromUserSignedAction()`
-- [ ] `floatToIntForHashing()`, `addressToBytes()`
-- [ ] Python SDK naming parity: `bulkModifyOrdersNew()` alias, public `setPerpMeta()` (or document `registerPerpMeta()` as the equivalent), `getDex()`, `remapCoinSubscription()`, `spotDeployTokenActionInner()`, `cSignerInner()`
-
-### Infrastructure & Quality
-
-- [ ] CMake install targets, pkg-config file, `FindHyperliquid.cmake`
-- [ ] Shared library build (.so/.dylib/.dll)
-- [ ] Version numbering and API versioning
-- [ ] Conan recipe, vcpkg port
-- [ ] Unit tests: Keccak-256, ECDSA, EIP-712, signing, float conversion/precision
-- [ ] Integration tests against testnet
-- [ ] Mock HTTP server for network-free tests
-- [ ] CI (GitHub Actions) and coverage reporting
-- [ ] Doxygen API reference, architecture docs, Python migration guide
-- [ ] Advanced examples: market making, TWAP execution, portfolio rebalancing, WebSocket real-time data, multi-account
-- [ ] Security best practices, troubleshooting
-- [ ] HTTP connection pooling
-- [ ] Metadata caching improvements
-- [ ] Async support (C++20 coroutines)
-- [ ] Zero-copy message parsing (matters most for `fastAssetCtxs` and `l2Book`)
-- [ ] Windows MSVC (currently macOS/Linux)
-- [ ] ARM, cross-compilation
-- [ ] clang-tidy, sanitizers (ASan/UBSan/TSan)
+### Infrastructure
+- [ ] Error handling: typed error codes, rate-limit backoff
+- [ ] Testnet integration tests, CI
+- [ ] Shared library build, pkg-config / `FindHyperliquid.cmake`
+- [ ] Windows MSVC

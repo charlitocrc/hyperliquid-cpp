@@ -417,6 +417,133 @@ public:
                            const std::vector<Signature>& signatures,
                            int64_t nonce);
 
+    // -----------------------------------------------------------------------
+    // HIP-4 outcomes (prediction markets)
+    //
+    // Trading an outcome side is an ordinary order on its coin, built with
+    // outcomeCoin(outcome, side) ("#<10 * outcome + side>"): order(),
+    // bulkOrders(), modifyOrder(), cancel() and marketOpen() all take it.
+    // Sizes are whole shares; prices are in (0, 1) and rounded with
+    // roundOutcomePrice(). The Yes and No books of one outcome are merged, so
+    // buying Yes at p is the same order as selling No at 1 - p.
+    //
+    // The four calls below convert balances without trading. All are L1
+    // actions ({"type": "userOutcome", ...}); amounts are in quote tokens /
+    // shares, sent as decimal strings.
+    // -----------------------------------------------------------------------
+
+    /**
+     * Split `amount` quote tokens into `amount` Yes and `amount` No shares.
+     * Wire: {"type": "userOutcome", "splitOutcome": {"outcome": N, "amount": "X"}}
+     */
+    nlohmann::json splitOutcome(int64_t outcome, double amount);
+
+    /**
+     * Merge `amount` Yes and `amount` No shares back into quote tokens.
+     * @param amount nullopt merges the maximum possible
+     */
+    nlohmann::json mergeOutcome(int64_t outcome, std::optional<double> amount = std::nullopt);
+
+    /**
+     * Merge `amount` Yes shares of every outcome of a question into quote
+     * tokens (one of them is certain to pay out).
+     * @param amount nullopt merges the maximum possible
+     */
+    nlohmann::json mergeQuestion(int64_t question, std::optional<double> amount = std::nullopt);
+
+    /**
+     * Convert `amount` No shares of one outcome of a question into `amount`
+     * Yes shares of every other outcome of that question.
+     */
+    nlohmann::json negateOutcome(int64_t question, int64_t outcome, double amount);
+
+    // -----------------------------------------------------------------------
+    // HIP-4 deployment (testnet-only at the time of writing)
+    //
+    // Deployers instantiate validator-approved templates (Info::outcomeTemplates())
+    // under their venue; Info::outcomeDeployerLimits() reports capacity left.
+    // Like the Python SDK's spot/perp deploy actions, these are signed without
+    // a vault, so a vault_address configured here is neither signed nor sent.
+    // -----------------------------------------------------------------------
+
+    /**
+     * Become an outcome deployer under `venue_name` (2-4 lowercase letters,
+     * unique across venues and perp dexs). Requires the deployer stake and
+     * Standard account abstraction.
+     * Wire: {"type": "activateOutcomeDeployer", "activate": {"venueName": ".."}}
+     */
+    nlohmann::json activateOutcomeDeployer(const std::string& venue_name);
+
+    /**
+     * Stop being an outcome deployer. Permanent: the venue name stays
+     * reserved. Needs 183 days since activation and no active outcomes.
+     * Wire: {"type": "activateOutcomeDeployer", "deactivate": null}
+     */
+    nlohmann::json deactivateOutcomeDeployer();
+
+    /**
+     * Deploy a standalone YES/NO outcome from a standalone template.
+     *
+     * @param venue The deployer's venue (a sub-deployer passes its deployer's)
+     * @param instance Template id and its keyword values
+     * @param deployer_fee_scale In [0, 10]; users pay the base outcome fee times
+     *        scale + max(scale, 1), of which the deployer gets `scale`
+     */
+    nlohmann::json registerStandaloneOutcomeFromTemplate(const std::string& venue,
+                                                         const OutcomeTemplateInstance& instance,
+                                                         double deployer_fee_scale);
+
+    /**
+     * Deploy a question and its named outcomes in one action. A fallback
+     * outcome is created automatically, so N named outcomes register N + 1.
+     *
+     * @param question Question template instance
+     * @param deployer_fee_scale Applies to every outcome of the question
+     * @param named_outcomes Question-outcome template instances; each template
+     *        must declare `question`'s template as its parent
+     */
+    nlohmann::json registerQuestionFromTemplate(
+        const std::string& venue,
+        const OutcomeTemplateInstance& question,
+        double deployer_fee_scale,
+        const std::vector<OutcomeTemplateInstance>& named_outcomes);
+
+    /**
+     * Add one named outcome to a live question of the deployer. Holders of the
+     * question's fallback YES receive the same balance of the new outcome's YES.
+     */
+    nlohmann::json registerAndAssociateNamedOutcomeFromTemplate(
+        const std::string& venue,
+        int64_t question,
+        const OutcomeTemplateInstance& named_outcome);
+
+    /**
+     * Settle one outcome of the deployer. Standalone outcomes may settle to
+     * any fraction in [0, 1]; question outcomes only to 0 or 1, and a question
+     * outcome settles to 1 only once it is the last active one.
+     */
+    nlohmann::json settleOutcome(const std::string& venue, const OutcomeSettlement& settlement);
+
+    /**
+     * Settle every remaining outcome of a question at once: exactly one
+     * settlement at 1, the rest at 0. The fallback settles to 0 automatically.
+     *
+     * Sent as the `settleQuestion2` variant (the original settleQuestion is
+     * discontinued).
+     *
+     * @param name_and_description The question's, exactly as outcomeMeta() lists it
+     */
+    nlohmann::json settleQuestion(const std::string& venue,
+                                  int64_t question,
+                                  const std::vector<OutcomeSettlement>& settlements,
+                                  const std::pair<std::string, std::string>& name_and_description);
+
+    /**
+     * Grant or revoke sub-deployer permissions for this deployer's venue.
+     */
+    nlohmann::json setOutcomeSubDeployers(const std::string& venue,
+                                          const std::vector<OutcomeSubDeployer>& changes);
+
     /**
      * Update leverage for a coin
      */
@@ -494,9 +621,70 @@ public:
     nlohmann::json noop(std::optional<int64_t> nonce = std::nullopt);
 
     /**
+     * Deposit into or withdraw from a vault.
+     *
+     * Wire action: {"type": "vaultTransfer", "vaultAddress": "0x..",
+     *               "isDeposit": bool, "usd": <int, 6 decimals>}
+     *
+     * The vault is named by the action itself, so a vault_address configured on
+     * this Exchange is neither signed over nor sent: this always moves funds
+     * between the master account and `vault_address` below.
+     *
+     * NOTE for anyone porting from the Python SDK: its vault_usd_transfer()
+     * takes the raw wire integer, so `5_000_000` there means 5 USD. This method
+     * takes plain USD like every other amount in this SDK -- usdTransfer(),
+     * updateIsolatedMargin() -- and scales it. Passing 5000000 here would move
+     * five million dollars, not five.
+     *
+     * Withdrawals are subject to the vault's lock-up; HLP's is 4 days from the
+     * most recent deposit, and the exchange rejects an early withdrawal.
+     *
+     * @param vault_address Vault's onchain address, 42-character hexadecimal
+     * @param is_deposit true to move USDC into the vault, false to take it out
+     * @param usd Amount in USD, e.g. 5.0 for five dollars. Must be positive.
+     */
+    nlohmann::json vaultTransfer(const std::string& vault_address,
+                                 bool is_deposit,
+                                 double usd);
+
+    /**
+     * Withdraw USDC from Hyperliquid to an Arbitrum address, via the bridge.
+     *
+     * Wire action: {"type": "withdraw3", "destination": "0x..",
+     *               "amount": "<float string>", "time": <ms>}
+     *
+     * Signed by the user's wallet only -- no Arbitrum transaction is needed.
+     * Validators handle the Arbitrum side and the funds arrive in 3-4 minutes.
+     * The exchange charges a withdrawal fee, deducted from the amount.
+     *
+     * This moves money off the exchange to an address that cannot be recovered
+     * if it is wrong. The destination is not validated here beyond what the
+     * exchange checks.
+     *
+     * @param amount Amount in USDC to withdraw
+     * @param destination Arbitrum address, 42-character hexadecimal format
+     */
+    nlohmann::json withdrawFromBridge(double amount, const std::string& destination);
+
+    /**
      * Set expiration time for actions (optional)
      */
     void setExpiresAfter(std::optional<int64_t> expires_after);
+
+    /**
+     * Route this client's traffic over the websocket instead of HTTP.
+     *
+     * Covers both halves of the client: actions posted here and queries made
+     * through info_, over one shared socket, the same way they already share
+     * one HTTP connection. Every method keeps its signature and return shape.
+     *
+     * Brings the socket up and waits for it, so this is a single call after
+     * construction. Requests fall back to HTTP while the socket is down or
+     * reconnecting; see Info::useWebsocketTransport() for the details.
+     *
+     * @throws Error in a -DBUILD_WEBSOCKET=OFF build when enabling.
+     */
+    void useWebsocketTransport(bool enabled = true);
 
     // Public info object for queries
     Info info_;
@@ -519,6 +707,11 @@ private:
     nlohmann::json postAction(const nlohmann::json& action,
                              const Signature& signature,
                              int64_t nonce);
+
+    // Wraps one outcomeDeploy variant: {"type", "venue", "operation": {variant: body}}.
+    nlohmann::json postOutcomeDeploy(const std::string& venue,
+                                     const char* variant,
+                                     nlohmann::ordered_json body);
 
     double slippagePrice(const std::string& name,
                         bool is_buy,

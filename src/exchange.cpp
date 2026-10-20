@@ -2,6 +2,7 @@
 #include "hyperliquid/utils/constants.hpp"
 #include "hyperliquid/utils/conversions.hpp"
 #include <openssl/rand.h>
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -34,12 +35,49 @@ Exchange::Exchange(std::shared_ptr<Wallet> wallet,
 // in the envelope. The signature would then not cover the vault it is sent
 // with, so the server cannot verify it; we omit it from both instead. Only
 // reachable when an Exchange has a vault_address configured.
-// ponytail: a plain list, a lookup table does not pay for itself at four entries.
+// vaultTransfer belongs here for a different reason than the rest: it names its
+// target vault inside the action, so a configured vault in the envelope would
+// be a second, contradictory one. The Python SDK signs it with no vault and
+// sends it with one, same mismatch as below.
+//
+// HIP-4 deployer actions belong to the deployer account, like the Python SDK's
+// spot/perp deploy actions, which it signs with no vault.
+//
+// ponytail: a plain list, a lookup table does not pay for itself at seven entries.
 static bool actionIgnoresVault(const std::string& action_type) {
     return action_type == "setReferrer" ||
            action_type == "createSubAccount" ||
            action_type == "subAccountTransfer" ||
-           action_type == "subAccountSpotTransfer";
+           action_type == "subAccountSpotTransfer" ||
+           action_type == "vaultTransfer" ||
+           action_type == "activateOutcomeDeployer" ||
+           action_type == "outcomeDeploy";
+}
+
+// Lot size. Outcomes are listed in no meta response and trade whole shares, so
+// they are the one asset class without an entry. Every other name was already
+// resolved by nameToAsset(), which throws for unknown ones.
+static int szDecimalsFor(const Info& info, int asset) {
+    auto it = info.asset_to_sz_decimals_.find(asset);
+    return it == info.asset_to_sz_decimals_.end() ? 0 : it->second;
+}
+
+// Tick size. HIP-3 perps (110000+) are perps, not spot, despite sitting above
+// the spot range: the Python SDK's `asset >= 10_000` gives them spot's 8
+// decimals, which the exchange rejects for 7+ decimal prices.
+static double roundPriceFor(double px, int asset, int sz_decimals) {
+    if (asset >= OUTCOME_ASSET_OFFSET) {
+        return roundOutcomePrice(px);
+    }
+    const bool is_spot = asset >= 10000 && asset < 100000;
+    return roundPrice(px, sz_decimals, is_spot);
+}
+
+static OrderRequest roundedToTickAndLot(const Info& info, OrderRequest order, int asset) {
+    const int sz_decimals = szDecimalsFor(info, asset);
+    order.limit_px = roundPriceFor(order.limit_px, asset, sz_decimals);
+    order.sz = roundSize(order.sz, sz_decimals);
+    return order;
 }
 
 nlohmann::json Exchange::postAction(const nlohmann::json& action,
@@ -86,28 +124,82 @@ nlohmann::json Exchange::postL1Action(const nlohmann::ordered_json& action,
     return postAction(action, signature, nonce);
 }
 
+nlohmann::json Exchange::vaultTransfer(const std::string& vault_address,
+                                      bool is_deposit,
+                                      double usd) {
+    if (usd <= 0.0) {
+        throw std::invalid_argument("vaultTransfer usd must be positive; "
+                                    "use is_deposit = false to withdraw");
+    }
+
+    nlohmann::ordered_json action;
+    action["type"] = "vaultTransfer";
+    action["vaultAddress"] = vault_address;
+    action["isDeposit"] = is_deposit;
+    // Wire format is an integer with 6 decimals, the same encoding
+    // updateIsolatedMargin() uses for ntli.
+    action["usd"] = floatToUsdInt(usd);
+
+    return postL1Action(action);
+}
+
+nlohmann::json Exchange::withdrawFromBridge(double amount, const std::string& destination) {
+    nlohmann::json action = {
+        {"type", "withdraw3"},
+        {"destination", destination},
+        {"amount", floatToWire(amount)},
+        {"time", getTimestampMs()}
+    };
+
+    std::vector<EIP712Type> payload_types = {
+        {"hyperliquidChain", "string"},
+        {"destination", "string"},
+        {"amount", "string"},
+        {"time", "uint64"}
+    };
+
+    bool is_mainnet = (base_url_ == MAINNET_API_URL);
+    auto signature = signUserSignedAction(*wallet_, action, payload_types,
+                                         "HyperliquidTransaction:Withdraw",
+                                         is_mainnet);
+
+    // User-signed action: the nonce is the "time" already inside the action, so
+    // the two cannot disagree.
+    return postAction(action, signature, action["time"]);
+}
+
+void Exchange::useWebsocketTransport(bool enabled) {
+    info_.useWebsocketTransport(enabled);
+    // Adopt whatever info_ settled on rather than deciding again here, so the
+    // two halves of the client cannot end up on different sockets.
+    ws_transport_ = info_.websocketTransport();
+}
+
 double Exchange::slippagePrice(const std::string& name,
                               bool is_buy,
                               double slippage,
                               std::optional<double> px) {
     std::string coin = info_.nameToCoin(name);
+    int asset = info_.nameToAsset(name);
 
     // Get mid price if not provided
     if (!px.has_value()) {
         auto mids = info_.allMids("");
-        px = std::stod(mids[coin].get<std::string>());
+        px = std::stod(mids.at(coin).get<std::string>());
     }
-
-    int asset = info_.coin_to_asset_[coin];
-    bool is_spot = asset >= 10000;
-    int sz_decimals = info_.asset_to_sz_decimals_[asset];
 
     // Calculate slippage
     double price = px.value();
     price *= is_buy ? (1.0 + slippage) : (1.0 - slippage);
 
+    // An outcome side pays at most 1, so its price lives strictly inside
+    // (0, 1); slippage off a 0.98 mid would otherwise ask for 1.029.
+    if (asset >= OUTCOME_ASSET_OFFSET) {
+        price = std::clamp(price, 0.00001, 0.99999);
+    }
+
     // Round to tick size (5 significant figures and MAX_DECIMALS - szDecimals)
-    return roundPrice(price, sz_decimals, is_spot);
+    return roundPriceFor(price, asset, szDecimalsFor(info_, asset));
 }
 
 void Exchange::setExpiresAfter(std::optional<int64_t> expires_after) {
@@ -122,20 +214,12 @@ nlohmann::json Exchange::order(const std::string& coin,
                                bool reduce_only,
                                const std::optional<Cloid>& cloid,
                                const std::optional<BuilderInfo>& builder) {
-    // Get asset info for rounding
-    int asset = info_.nameToAsset(coin);
-    int sz_decimals = info_.asset_to_sz_decimals_[asset];
-    bool is_spot = asset >= 10000;
-
-    // Round price and size to tick/lot size
-    double rounded_px = roundPrice(limit_px, sz_decimals, is_spot);
-    double rounded_sz = roundSize(sz, sz_decimals);
-
+    // bulkOrders() rounds to tick/lot size.
     OrderRequest order_req;
     order_req.coin = coin;
     order_req.is_buy = is_buy;
-    order_req.sz = rounded_sz;
-    order_req.limit_px = rounded_px;
+    order_req.sz = sz;
+    order_req.limit_px = limit_px;
     order_req.order_type = order_type;
     order_req.reduce_only = reduce_only;
     order_req.cloid = cloid;
@@ -149,15 +233,8 @@ nlohmann::json Exchange::bulkOrders(const std::vector<OrderRequest>& orders,
     std::vector<OrderWire> order_wires;
     for (const auto& order : orders) {
         int asset = info_.nameToAsset(order.coin);
-        int sz_decimals = info_.asset_to_sz_decimals_[asset];
-        bool is_spot = asset >= 10000;
-
-        // Round price and size to tick/lot size
-        OrderRequest rounded_order = order;
-        rounded_order.limit_px = roundPrice(order.limit_px, sz_decimals, is_spot);
-        rounded_order.sz = roundSize(order.sz, sz_decimals);
-
-        order_wires.push_back(orderRequestToOrderWire(rounded_order, asset));
+        order_wires.push_back(
+            orderRequestToOrderWire(roundedToTickAndLot(info_, order, asset), asset));
     }
 
     return postL1Action(orderWiresToOrderAction(order_wires, builder, grouping));
@@ -268,21 +345,13 @@ nlohmann::json Exchange::modifyOrder(const OidOrCloid& oid,
                                      const OrderType& order_type,
                                      bool reduce_only,
                                      const std::optional<Cloid>& cloid) {
-    // Get asset info for rounding
-    int asset = info_.nameToAsset(coin);
-    int sz_decimals = info_.asset_to_sz_decimals_[asset];
-    bool is_spot = asset >= 10000;
-
-    // Round price and size to tick/lot size
-    double rounded_px = roundPrice(limit_px, sz_decimals, is_spot);
-    double rounded_sz = roundSize(sz, sz_decimals);
-
+    // bulkModifyOrders() rounds to tick/lot size.
     ModifyRequest modify_req;
     modify_req.oid = oid;
     modify_req.order.coin = coin;
     modify_req.order.is_buy = is_buy;
-    modify_req.order.sz = rounded_sz;
-    modify_req.order.limit_px = rounded_px;
+    modify_req.order.sz = sz;
+    modify_req.order.limit_px = limit_px;
     modify_req.order.order_type = order_type;
     modify_req.order.reduce_only = reduce_only;
     modify_req.order.cloid = cloid;
@@ -294,15 +363,8 @@ nlohmann::json Exchange::bulkModifyOrders(const std::vector<ModifyRequest>& modi
     nlohmann::ordered_json modifies_array = nlohmann::ordered_json::array();
     for (const auto& modify : modifies) {
         int asset = info_.nameToAsset(modify.order.coin);
-        int sz_decimals = info_.asset_to_sz_decimals_[asset];
-        bool is_spot = asset >= 10000;
-
-        // Round price and size to tick/lot size
-        OrderRequest rounded_order = modify.order;
-        rounded_order.limit_px = roundPrice(modify.order.limit_px, sz_decimals, is_spot);
-        rounded_order.sz = roundSize(modify.order.sz, sz_decimals);
-
-        OrderWire wire = orderRequestToOrderWire(rounded_order, asset);
+        OrderWire wire = orderRequestToOrderWire(
+            roundedToTickAndLot(info_, modify.order, asset), asset);
 
         nlohmann::ordered_json modify_wire;
         if (std::holds_alternative<int64_t>(modify.oid)) {
@@ -329,7 +391,7 @@ nlohmann::json Exchange::twapOrder(const std::string& coin,
                                    bool reduce_only,
                                    bool randomize) {
     int asset = info_.nameToAsset(coin);
-    int sz_decimals = info_.asset_to_sz_decimals_[asset];
+    int sz_decimals = szDecimalsFor(info_, asset);
 
     double rounded_sz = roundSize(sz, sz_decimals);
     if (rounded_sz <= 0.0) {
@@ -611,6 +673,206 @@ nlohmann::json Exchange::multiSig(const std::string& multi_sig_user,
                                        expires_after_, base_url_ == MAINNET_API_URL);
 
     return postAction(action, signature, nonce);
+}
+
+// --- HIP-4 outcomes ----------------------------------------------------------
+//
+// Field order below is the order the docs give, which is what gets hashed:
+// these are L1 actions, signed over their msgpack encoding.
+
+static nlohmann::ordered_json userOutcomeAction(const char* variant, nlohmann::ordered_json body) {
+    nlohmann::ordered_json action;
+    action["type"] = "userOutcome";
+    action[variant] = std::move(body);
+    return action;
+}
+
+static void requirePositive(double amount, const char* what) {
+    if (!(amount > 0.0)) {
+        throw std::invalid_argument(std::string(what) + " amount must be positive");
+    }
+}
+
+// nullopt means "as much as possible", which the wire spells null.
+static nlohmann::ordered_json optionalAmount(std::optional<double> amount, const char* what) {
+    if (!amount.has_value()) {
+        return nullptr;
+    }
+    requirePositive(*amount, what);
+    return floatToWire(*amount);
+}
+
+nlohmann::json Exchange::splitOutcome(int64_t outcome, double amount) {
+    requirePositive(amount, "splitOutcome");
+
+    nlohmann::ordered_json body;
+    body["outcome"] = outcome;
+    body["amount"] = floatToWire(amount);
+    return postL1Action(userOutcomeAction("splitOutcome", std::move(body)));
+}
+
+nlohmann::json Exchange::mergeOutcome(int64_t outcome, std::optional<double> amount) {
+    nlohmann::ordered_json body;
+    body["outcome"] = outcome;
+    body["amount"] = optionalAmount(amount, "mergeOutcome");
+    return postL1Action(userOutcomeAction("mergeOutcome", std::move(body)));
+}
+
+nlohmann::json Exchange::mergeQuestion(int64_t question, std::optional<double> amount) {
+    nlohmann::ordered_json body;
+    body["question"] = question;
+    body["amount"] = optionalAmount(amount, "mergeQuestion");
+    return postL1Action(userOutcomeAction("mergeQuestion", std::move(body)));
+}
+
+nlohmann::json Exchange::negateOutcome(int64_t question, int64_t outcome, double amount) {
+    requirePositive(amount, "negateOutcome");
+
+    nlohmann::ordered_json body;
+    body["question"] = question;
+    body["outcome"] = outcome;
+    body["amount"] = floatToWire(amount);
+    return postL1Action(userOutcomeAction("negateOutcome", std::move(body)));
+}
+
+nlohmann::json Exchange::activateOutcomeDeployer(const std::string& venue_name) {
+    if (venue_name.empty()) {
+        throw std::invalid_argument("activateOutcomeDeployer venue name must not be empty");
+    }
+
+    nlohmann::ordered_json action;
+    action["type"] = "activateOutcomeDeployer";
+    action["activate"] = {{"venueName", venue_name}};
+    return postL1Action(action);
+}
+
+nlohmann::json Exchange::deactivateOutcomeDeployer() {
+    nlohmann::ordered_json action;
+    action["type"] = "activateOutcomeDeployer";
+    action["deactivate"] = nullptr;
+    return postL1Action(action);
+}
+
+nlohmann::json Exchange::postOutcomeDeploy(const std::string& venue,
+                                           const char* variant,
+                                           nlohmann::ordered_json body) {
+    if (venue.empty()) {
+        throw std::invalid_argument(std::string(variant) + " requires the deployer's venue");
+    }
+
+    nlohmann::ordered_json operation;
+    operation[variant] = std::move(body);
+
+    nlohmann::ordered_json action;
+    action["type"] = "outcomeDeploy";
+    action["venue"] = venue;
+    action["operation"] = std::move(operation);
+    return postL1Action(action);
+}
+
+static nlohmann::ordered_json stringPair(const std::pair<std::string, std::string>& p) {
+    return nlohmann::ordered_json::array({p.first, p.second});
+}
+
+// {"id", "keywordToValue": [[k, v], ...]}; the map keeps keywords sorted.
+static nlohmann::ordered_json templateInstanceWire(const OutcomeTemplateInstance& instance) {
+    nlohmann::ordered_json keyword_to_value = nlohmann::ordered_json::array();
+    for (const auto& kv : instance.keyword_to_value) {
+        keyword_to_value.push_back(stringPair(kv));
+    }
+
+    nlohmann::ordered_json wire;
+    wire["id"] = instance.id;
+    wire["keywordToValue"] = std::move(keyword_to_value);
+    return wire;
+}
+
+static nlohmann::ordered_json settlementWire(const OutcomeSettlement& settlement) {
+    nlohmann::ordered_json wire;
+    wire["outcome"] = settlement.outcome;
+    wire["settleFraction"] = floatToWire(settlement.settle_fraction);
+    wire["details"] = "";  // the exchange requires it empty
+    wire["nameAndDescription"] = stringPair(settlement.name_and_description);
+    wire["sideNames"] = stringPair(settlement.side_names);
+    return wire;
+}
+
+nlohmann::json Exchange::registerStandaloneOutcomeFromTemplate(const std::string& venue,
+                                                               const OutcomeTemplateInstance& instance,
+                                                               double deployer_fee_scale) {
+    auto body = templateInstanceWire(instance);
+    body["deployerFeeScale"] = floatToWire(deployer_fee_scale);
+    return postOutcomeDeploy(venue, "registerStandaloneOutcomeFromTemplate", std::move(body));
+}
+
+nlohmann::json Exchange::registerQuestionFromTemplate(
+    const std::string& venue,
+    const OutcomeTemplateInstance& question,
+    double deployer_fee_scale,
+    const std::vector<OutcomeTemplateInstance>& named_outcomes) {
+    auto question_wire = templateInstanceWire(question);
+    question_wire["deployerFeeScale"] = floatToWire(deployer_fee_scale);
+
+    nlohmann::ordered_json named = nlohmann::ordered_json::array();
+    for (const auto& instance : named_outcomes) {
+        named.push_back(templateInstanceWire(instance));
+    }
+
+    nlohmann::ordered_json body;
+    body["questionTemplateInstance"] = std::move(question_wire);
+    body["namedOutcomeTemplateInstances"] = std::move(named);
+    return postOutcomeDeploy(venue, "registerQuestionFromTemplate", std::move(body));
+}
+
+nlohmann::json Exchange::registerAndAssociateNamedOutcomeFromTemplate(
+    const std::string& venue,
+    int64_t question,
+    const OutcomeTemplateInstance& named_outcome) {
+    nlohmann::ordered_json body;
+    body["question"] = question;
+    body["namedOutcomeTemplateInstance"] = templateInstanceWire(named_outcome);
+    return postOutcomeDeploy(venue, "registerAndAssociateNamedOutcomeFromTemplate", std::move(body));
+}
+
+nlohmann::json Exchange::settleOutcome(const std::string& venue, const OutcomeSettlement& settlement) {
+    return postOutcomeDeploy(venue, "settleOutcome", settlementWire(settlement));
+}
+
+nlohmann::json Exchange::settleQuestion(const std::string& venue,
+                                        int64_t question,
+                                        const std::vector<OutcomeSettlement>& settlements,
+                                        const std::pair<std::string, std::string>& name_and_description) {
+    if (settlements.empty()) {
+        throw std::invalid_argument("settleQuestion requires the question's remaining outcomes");
+    }
+
+    nlohmann::ordered_json settlements_wire = nlohmann::ordered_json::array();
+    for (const auto& settlement : settlements) {
+        settlements_wire.push_back(settlementWire(settlement));
+    }
+
+    nlohmann::ordered_json body;
+    body["question"] = question;
+    body["outcomeSettlements"] = std::move(settlements_wire);
+    body["nameAndDescription"] = stringPair(name_and_description);
+    return postOutcomeDeploy(venue, "settleQuestion2", std::move(body));
+}
+
+nlohmann::json Exchange::setOutcomeSubDeployers(const std::string& venue,
+                                                const std::vector<OutcomeSubDeployer>& changes) {
+    if (changes.empty()) {
+        throw std::invalid_argument("setOutcomeSubDeployers requires at least one change");
+    }
+
+    nlohmann::ordered_json body = nlohmann::ordered_json::array();
+    for (const auto& change : changes) {
+        nlohmann::ordered_json entry;
+        entry["variant"] = change.variant;
+        entry["user"] = normalizeAddress(change.user);
+        entry["allowed"] = change.allowed;
+        body.push_back(std::move(entry));
+    }
+    return postOutcomeDeploy(venue, "setSubDeployers", std::move(body));
 }
 
 nlohmann::json Exchange::updateLeverage(int leverage,

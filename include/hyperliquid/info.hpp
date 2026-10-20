@@ -35,12 +35,17 @@ public:
     ~Info() override;
 
     /**
-     * Get asset number from coin/pair name
+     * Get asset number from coin/pair name.
+     *
+     * HIP-4 outcome coins ("#<10 * outcome + side>", see outcomeCoin()) are
+     * resolved from the name itself, with no metadata needed:
+     * "#10" -> 100000010.
      */
     int nameToAsset(const std::string& name) const;
 
     /**
-     * Get canonical coin name from display name
+     * Get canonical coin name from display name. An outcome coin ("#10") is
+     * its own canonical name.
      */
     const std::string& nameToCoin(const std::string& name) const;
 
@@ -712,18 +717,48 @@ public:
      *
      * The docs show only `{outcomes: [...]}`; live mainnet also returns
      * `questions`, `deployers` and `feeScale`, and each outcome carries a
-     * `quoteToken` the docs omit.
+     * `quoteToken` the docs omit. Deployer-created outcomes also carry their
+     * `venue` and `deployerFeeScale`.
+     *
+     * To trade side `s` of outcome `o`, pass outcomeCoin(o, s) ("#<10o+s>")
+     * as the coin to Exchange::order() and friends.
      *
      * @return {
      *           outcomes: [{outcome: int, name, description, quoteToken,
-     *                       sideSpecs: [{name}, ...]}, ...],
+     *                       sideSpecs: [{name}, ...],
+     *                       venue?, deployerFeeScale?}, ...],
      *           questions: [{question: int, name, description, fallbackOutcome,
      *                        namedOutcomes, settledNamedOutcomes}, ...],
-     *           deployers: [...],
+     *           deployers: [{deployer, venue,
+     *                        subDeployers: [[variant, [user, ...]], ...]}, ...],
      *           feeScale: float string
      *         }
      */
     nlohmann::json outcomeMeta();
+
+    /**
+     * Every validator-approved HIP-4 outcome template, which deployers
+     * instantiate with Exchange::registerStandaloneOutcomeFromTemplate() and
+     * friends.
+     *
+     * @return [{id, name, description,   // name/description hold {keyword} placeholders
+     *           role: {standaloneOutcome: {sideNames: [...]}}
+     *               | "question"
+     *               | {questionOutcome: {parent: <question template id>}},
+     *           keywords: [[keyword, hint], ...]}, ...]
+     *         where hint is one of dateTime, date, string, shortString,
+     *         hlPerp, uInt, uDecimal.
+     */
+    nlohmann::json outcomeTemplates();
+
+    /**
+     * How many more outcomes a HIP-4 deployer venue may create.
+     *
+     * @param venue Deployer venue name (see outcomeMeta()'s `deployers`)
+     * @return {nDailyOutcomesRemaining: int, nActiveOutcomesRemaining: int}
+     * @throws std::invalid_argument if venue is empty
+     */
+    nlohmann::json outcomeDeployerLimits(const std::string& venue);
 
     /**
      * How a prediction-market outcome settled.
@@ -857,6 +892,25 @@ public:
      */
     bool unsubscribe(const nlohmann::json& subscription, int subscription_id);
 
+    /**
+     * Route this object's queries over the websocket instead of HTTP.
+     *
+     * Every method here keeps its signature and its return shape; only the
+     * transport changes. The websocket is brought up and waited for if this
+     * Info was constructed with the default skip_ws = true, so enabling it is a
+     * single call. If the socket does not come up within timeout_ms the switch
+     * still takes effect and requests fall back to HTTP until it does.
+     *
+     * Requests fall back to HTTP whenever the socket is down or reconnecting,
+     * so a blip costs latency rather than a failed request.
+     *
+     * Turning it off leaves the socket up, so existing subscriptions keep
+     * running; call disconnectWebsocket() to close it.
+     *
+     * @throws Error in a -DBUILD_WEBSOCKET=OFF build when enabling.
+     */
+    void useWebsocketTransport(bool enabled = true);
+
     /** Close the websocket. No-op when skip_ws was true. */
     void disconnectWebsocket();
 
@@ -877,12 +931,17 @@ private:
 #ifdef HYPERLIQUID_WEBSOCKET
     /** Returns the manager, or throws if this Info was built with skip_ws. */
     WebSocketManager& requireWebSocket() const;
-
-    // Null unless the constructor was given skip_ws = false. Absent entirely in
-    // a -DBUILD_WEBSOCKET=OFF build, where unique_ptr could not destroy an
-    // incomplete WebSocketManager anyway.
-    std::unique_ptr<WebSocketManager> ws_manager_;
 #endif
+
+    // The socket, if one was ever opened: by skip_ws = false, or later by
+    // useWebsocketTransport(). Distinct from API::ws_transport_, which is only
+    // set while queries are actually routed over it -- a socket can serve
+    // subscriptions with the transport switched off.
+    //
+    // shared_ptr rather than unique_ptr so an Exchange and its info_ share one
+    // socket; it also makes the member safe to declare against an incomplete
+    // WebSocketManager in a -DBUILD_WEBSOCKET=OFF build, where it stays null.
+    std::shared_ptr<WebSocketManager> ws_manager_;
 };
 
 } // namespace hyperliquid

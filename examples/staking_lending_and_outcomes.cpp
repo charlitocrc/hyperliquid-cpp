@@ -1,5 +1,6 @@
 #include <hyperliquid/info.hpp>
 #include <hyperliquid/utils/constants.hpp>
+#include <hyperliquid/utils/conversions.hpp>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -126,6 +127,36 @@ int main(int argc, char** argv) {
                 std::cout << "settleFraction " << settled.value("settleFraction", "?")
                           << " (" << settled.value("details", "") << ")\n";
             }
+        }
+
+        // Each side of an outcome trades as its own coin, "#<10*outcome + side>";
+        // these work anywhere a coin name does (l2Snapshot, order, cancel...).
+        if (!outcomes.empty()) {
+            const auto& first = outcomes[0];
+            const std::string yes = hyperliquid::outcomeCoin(first["outcome"].get<int64_t>(), 0);
+            std::cout << "\n=== l2Snapshot(" << yes << ") ["
+                      << first["sideSpecs"][0].value("name", "?") << " side] ===\n";
+            const auto levels = info.l2Snapshot(yes)["levels"];
+            for (const char* side : {"bids", "asks"}) {
+                const auto& book = levels[std::string(side) == "bids" ? 0 : 1];
+                std::cout << "  " << side << ": ";
+                if (book.empty()) {
+                    std::cout << "(empty)";
+                } else {
+                    std::cout << book[0]["sz"].get<std::string>() << " @ "
+                              << book[0]["px"].get<std::string>();
+                }
+                std::cout << "\n";
+            }
+        }
+
+        // Templates are what HIP-4 deployers instantiate.
+        std::cout << "\n=== outcomeTemplates ===\n";
+        const auto templates = info.outcomeTemplates();
+        std::cout << "  " << templates.size() << " templates, e.g.\n";
+        for (size_t i = 0; i < 3 && i < templates.size(); ++i) {
+            std::cout << "    " << templates[i].value("id", "?") << ": "
+                      << templates[i].value("name", "") << "\n";
         }
 
         return 0;

@@ -372,7 +372,7 @@ void from_json(const json& j, OpenOrders& out) {
 
 void from_json(const json& j, UserBalance& out) {
     j.at("coin").get_to(out.coin);
-    j.at("token").get_to(out.token);
+    optionalField(j, "token", out.token);
     j.at("hold").get_to(out.hold);
     j.at("total").get_to(out.total);
     j.at("entryNtl").get_to(out.entry_ntl);
@@ -407,6 +407,9 @@ void from_json(const json& j, OutcomeSpec& out) {
     j.at("name").get_to(out.name);
     j.at("description").get_to(out.description);
     j.at("sideSpecs").get_to(out.side_specs);
+    optionalField(j, "quoteToken", out.quote_token);
+    optionalField(j, "venue", out.venue);
+    optionalField(j, "deployerFeeScale", out.deployer_fee_scale);
 }
 
 void from_json(const json& j, QuestionSpec& out) {

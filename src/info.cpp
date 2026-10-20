@@ -1,6 +1,10 @@
 #include "hyperliquid/info.hpp"
 #include "hyperliquid/errors.hpp"
 #include "hyperliquid/utils/constants.hpp"
+#include "hyperliquid/utils/conversions.hpp"
+#include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <stdexcept>
 
 #ifdef HYPERLIQUID_WEBSOCKET
@@ -22,7 +26,7 @@ Info::Info(const std::string& base_url,
 
 #ifdef HYPERLIQUID_WEBSOCKET
     if (!skip_ws) {
-        ws_manager_ = std::make_unique<WebSocketManager>(base_url_);
+        ws_manager_ = std::make_shared<WebSocketManager>(base_url_);
         ws_manager_->start();
     }
 #else
@@ -54,6 +58,22 @@ bool Info::unsubscribe(const nlohmann::json& subscription, int subscription_id) 
     return requireWebSocket().unsubscribe(subscription, subscription_id);
 }
 
+void Info::useWebsocketTransport(bool enabled) {
+    if (!enabled) {
+        ws_transport_.reset();
+        return;
+    }
+    if (!ws_manager_) {
+        ws_manager_ = std::make_shared<WebSocketManager>(base_url_);
+        ws_manager_->start();
+    }
+    // Waited for here rather than letting the first requests quietly fall back
+    // to HTTP, which would make the switch look like it did nothing. A timeout
+    // is not fatal: the fallback covers requests until the socket is up.
+    ws_manager_->waitUntilConnected(std::chrono::milliseconds(timeout_ms_));
+    ws_transport_ = ws_manager_;
+}
+
 void Info::disconnectWebsocket() {
     if (ws_manager_) {
         ws_manager_->stop();
@@ -75,6 +95,12 @@ int Info::subscribe(const nlohmann::json&, std::function<void(const nlohmann::js
 
 bool Info::unsubscribe(const nlohmann::json&, int) {
     throw Error(kNoWebSocketBuild);
+}
+
+void Info::useWebsocketTransport(bool enabled) {
+    if (enabled) {
+        throw Error(kNoWebSocketBuild);
+    }
 }
 
 void Info::disconnectWebsocket() {}
@@ -193,7 +219,32 @@ void Info::registerSpotMeta(const SpotMeta& spot_meta) {
     setSpotMeta(spot_meta);
 }
 
+// Outcome coins ("#<10 * outcome + side>") appear in no meta response; the
+// asset id is derived from the name, so they are parsed instead of looked up.
+static bool isOutcomeCoin(const std::string& name) {
+    return !name.empty() && name[0] == '#';
+}
+
+static int outcomeCoinToAsset(const std::string& name) {
+    const std::string digits = name.substr(1);
+    // Up to 10 digits fits int64 for stoll; outcomeAsset() bounds the rest.
+    if (digits.empty() || digits.size() > 10 ||
+        !std::all_of(digits.begin(), digits.end(), [](unsigned char c) { return std::isdigit(c); })) {
+        throw std::runtime_error("Invalid outcome coin: " + name);
+    }
+    const int64_t encoding = std::stoll(digits);
+    try {
+        return outcomeAsset(encoding / 10, static_cast<int>(encoding % 10));
+    } catch (const std::invalid_argument& e) {
+        throw std::runtime_error("Invalid outcome coin " + name + ": " + e.what());
+    }
+}
+
 int Info::nameToAsset(const std::string& name) const {
+    if (isOutcomeCoin(name)) {
+        return outcomeCoinToAsset(name);
+    }
+
     auto it = name_to_coin_.find(name);
     if (it == name_to_coin_.end()) {
         throw std::runtime_error("Unknown asset name: " + name);
@@ -209,6 +260,11 @@ int Info::nameToAsset(const std::string& name) const {
 }
 
 const std::string& Info::nameToCoin(const std::string& name) const {
+    if (isOutcomeCoin(name)) {
+        outcomeCoinToAsset(name);  // validates
+        return name;               // the coin is its own canonical name
+    }
+
     auto it = name_to_coin_.find(name);
     if (it == name_to_coin_.end()) {
         throw std::runtime_error("Unknown asset name: " + name);
@@ -729,6 +785,25 @@ nlohmann::json Info::settledOutcome(int64_t outcome) {
     nlohmann::json payload = {
         {"type", "settledOutcome"},
         {"outcome", outcome}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::outcomeTemplates() {
+    nlohmann::json payload = {
+        {"type", "outcomeTemplates"}
+    };
+    return post("/info", payload);
+}
+
+nlohmann::json Info::outcomeDeployerLimits(const std::string& venue) {
+    if (venue.empty()) {
+        throw std::invalid_argument("outcomeDeployerLimits requires a venue name");
+    }
+
+    nlohmann::json payload = {
+        {"type", "outcomeDeployerLimits"},
+        {"venue", venue}
     };
     return post("/info", payload);
 }

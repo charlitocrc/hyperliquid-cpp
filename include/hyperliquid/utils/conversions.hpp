@@ -63,4 +63,30 @@ double roundPrice(double price, int sz_decimals, bool is_spot);
  */
 double roundSize(double size, int sz_decimals);
 
+/** HIP-4 outcome asset ids start here (perps < 10000, spot 10000+, HIP-3 perps 110000+). */
+constexpr int OUTCOME_ASSET_OFFSET = 100000000;
+
+/**
+ * Order coin for one side of a HIP-4 outcome: "#<10 * outcome + side>".
+ *
+ * Outcome ids come from info.outcomeMeta(); side 0 is the first entry of the
+ * outcome's sideSpecs (usually "Yes"), side 1 the second. The same encoding
+ * names the side's token as "+<encoding>" in balances.
+ *
+ * @throws std::invalid_argument if side is not 0 or 1, or outcome is out of range
+ */
+std::string outcomeCoin(int64_t outcome, int side);
+
+/** Asset id for one side of a HIP-4 outcome: 100000000 + 10 * outcome + side. */
+int outcomeAsset(int64_t outcome, int side);
+
+/**
+ * Round an outcome price: 5 significant figures, at most 5 decimals.
+ *
+ * The docs publish no outcome tick; every resting price on live books has at
+ * most 5 decimals, and anything that passes this rounding is also valid under
+ * the generic spot rule, so it is safe either way.
+ */
+double roundOutcomePrice(double price);
+
 } // namespace hyperliquid

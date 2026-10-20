@@ -26,7 +26,7 @@ set(EXAMPLES
 )
 
 if(BUILD_WEBSOCKET)
-    list(APPEND EXAMPLES websocket_subscriptions)
+    list(APPEND EXAMPLES websocket_subscriptions websocket_post_requests)
 endif()
 
 foreach(EXAMPLE ${EXAMPLES})

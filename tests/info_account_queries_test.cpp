@@ -10,6 +10,7 @@
 #include "test_info.hpp"
 
 #include <cassert>
+#include <stdexcept>
 #include <string>
 
 using hyperliquid_test::assertSingleRequest;
@@ -34,6 +35,27 @@ void parameterlessQueriesUseExpectedPayload() {
         TestInfo info;
         info.outcomeMeta();
         assertSingleRequest(info, {{"type", "outcomeMeta"}});
+    }
+    {
+        TestInfo info;
+        info.outcomeTemplates();
+        assertSingleRequest(info, {{"type", "outcomeTemplates"}});
+    }
+    {
+        TestInfo info;
+        info.outcomeDeployerLimits("out");
+        assertSingleRequest(info, {{"type", "outcomeDeployerLimits"}, {"venue", "out"}});
+    }
+    {
+        // An empty venue is an argument error, not a request.
+        TestInfo info;
+        bool threw = false;
+        try {
+            info.outcomeDeployerLimits("");
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+        assert(threw && info.requests().empty());
     }
     {
         TestInfo info;

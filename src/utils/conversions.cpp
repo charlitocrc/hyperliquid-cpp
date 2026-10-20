@@ -148,4 +148,25 @@ double roundSize(double size, int sz_decimals) {
     return std::round(size * multiplier) / multiplier;
 }
 
+int outcomeAsset(int64_t outcome, int side) {
+    if (side != 0 && side != 1) {
+        throw std::invalid_argument("outcome side must be 0 or 1");
+    }
+    // The asset id travels as an int; this keeps 100000000 + encoding in range.
+    constexpr int64_t max_outcome = (INT32_MAX - OUTCOME_ASSET_OFFSET) / 10;
+    if (outcome < 0 || outcome > max_outcome) {
+        throw std::invalid_argument("outcome id out of range: " + std::to_string(outcome));
+    }
+    return OUTCOME_ASSET_OFFSET + static_cast<int>(10 * outcome + side);
+}
+
+std::string outcomeCoin(int64_t outcome, int side) {
+    return "#" + std::to_string(outcomeAsset(outcome, side) - OUTCOME_ASSET_OFFSET);
+}
+
+double roundOutcomePrice(double price) {
+    // ponytail: 5 decimals inferred from live books, see the header.
+    return std::round(roundPrice(price, 0, false) * 1e5) / 1e5;
+}
+
 } // namespace hyperliquid

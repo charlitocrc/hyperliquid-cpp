@@ -428,6 +428,23 @@ void testWebData3AndOutcomes() {
     assert(!created.outcome_settled.has_value());
     ++checks_run;
 
+    // Verbatim mainnet frame (2026-10-20); the settle arm is a bare int.
+    const auto live = json::parse(R"([
+        {"outcomeCreated":{"outcome":14754,"name":"template:binaryPrice",
+         "description":"perp:BTC|priceDescription:BTC-USDC perp mark|seconds:60|threshold:81615|time:20261020-0745",
+         "sideSpecs":[{"name":"template:Yes"},{"name":"template:No"}],
+         "quoteToken":"USDC","venue":"out","deployerFeeScale":"1.0"}},
+        {"outcomeSettled":14751}])").get<WsOutcomeMetaUpdates>();
+    assert(live.size() == 2);
+    assert(live[0].outcome_created->outcome == 14754);
+    assert(live[0].outcome_created->side_specs[1].name == "template:No");
+    assert(live[0].outcome_created->quote_token == "USDC");
+    assert(live[0].outcome_created->venue == "out");
+    assert(live[0].outcome_created->deployer_fee_scale == "1.0");
+    assert(live[1].outcome_settled == 14751);
+    assert(!created.outcome_created->venue.has_value());
+    ++checks_run;
+
     const auto settled = json{{"outcomeSettled", 5}}.get<WsOutcomeMetaUpdate>();
     assert(settled.outcome_settled.has_value() && *settled.outcome_settled == 5);
     assert(!settled.outcome_created.has_value());

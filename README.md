@@ -14,6 +14,7 @@ A C++ SDK for interacting with the Hyperliquid decentralized exchange, supportin
 - ✅ Transfer USD and spot tokens
 - ✅ Leverage management
 - ✅ Multi-signature accounts
+- ✅ WebSocket subscriptions, and WebSocket transport for any request
 - ✅ Staking: deposit, withdraw, delegate, plus borrow/lend and prediction-market queries
 - ✅ Full EIP-712 signing support
 - ✅ Testnet and Mainnet support
@@ -230,8 +231,16 @@ sleeps 65 seconds to let the first suborders execute:
 ./build/examples/twap_order
 ```
 
+### 6. WebSocket Requests (`websocket_post_requests.cpp`)
+
+Send ordinary requests over the websocket instead of HTTP. Read-only, no API key:
+
+```bash
+./build/examples/websocket_post_requests
+```
+
 Other examples cover funding history, historical orders, user fees, candles, account
-queries, and perp deployment queries.
+queries, perp deployment queries, and websocket subscriptions.
 
 ## API Documentation
 
@@ -576,9 +585,9 @@ nlohmann::json extraAgents(const std::string& user);
 
 #### Staking, Borrow/Lend and Outcomes
 
-Read-only so far — the matching exchange actions (`cDeposit`, `tokenDelegate`,
-borrow/lend operations, `userOutcome`) are not implemented yet. Amounts come
-back as decimal strings throughout.
+Borrow/lend is read-only so far; staking and outcome actions live on
+`Exchange` (see Prediction Markets below). Amounts come back as decimal
+strings throughout.
 
 ```cpp
 // Staking. The wire types are named for the question rather than the answer,
@@ -598,6 +607,8 @@ nlohmann::json allBorrowLendReserveStates();
 // open, and also for an index that does not exist.
 nlohmann::json outcomeMeta();
 nlohmann::json settledOutcome(int64_t outcome);
+nlohmann::json outcomeTemplates();                          // HIP-4 deploy templates
+nlohmann::json outcomeDeployerLimits(const std::string& venue);
 
 // Spot deploy auctions. spotDeployState also reports the deployments the given
 // deployer has in flight.
@@ -607,6 +618,57 @@ nlohmann::json spotPairDeployAuctionStatus();
 
 Run `./build/examples/staking_lending_and_outcomes [address]` for a live tour
 of all of these — no private key needed.
+
+#### Prediction Markets (HIP-4 Outcomes)
+
+Each outcome has two sides, each its own token. Side `s` of outcome `o`
+(ids from `outcomeMeta()`; side 0 is the first `sideSpecs` entry, usually Yes)
+trades as the coin `#<10*o + s>` — asset id `100000000 + 10*o + s` — and shows
+up in balances as `+<10*o + s>`. No metadata is needed to resolve these, so the
+ordinary order methods take them directly:
+
+```cpp
+#include <hyperliquid/utils/conversions.hpp>
+
+std::string yes = hyperliquid::outcomeCoin(14200, 0);   // "#142000"
+
+// Sizes are whole shares; prices sit in (0, 1), are rounded to 5 significant
+// figures and at most 5 decimals, and marketOpen() clamps its slippage price
+// to [0.00001, 0.99999]. Buying Yes at p is the same order as selling No at 1-p.
+exchange.order(yes, true, 100, 0.42, limit_gtc);
+exchange.marketOpen(yes, true, 100);
+
+// Convert balances without trading (L1 action "userOutcome").
+exchange.splitOutcome(14200, 50);        // 50 USDC -> 50 Yes + 50 No
+exchange.mergeOutcome(14200);            // Yes + No -> USDC; nullopt = max
+exchange.mergeQuestion(480);             // one Yes of every outcome -> USDC
+exchange.negateOutcome(480, 14183, 10);  // 10 No -> 10 Yes of each sibling
+```
+
+Deployer actions (testnet-only at the time of writing) instantiate templates
+from `outcomeTemplates()`. They are signed without a vault, like the Python
+SDK's deploy actions. Keywords are a `std::map`, so they go out in the sorted
+order the exchange requires:
+
+```cpp
+exchange.activateOutcomeDeployer("ab");   // deactivateOutcomeDeployer() is permanent
+
+exchange.registerStandaloneOutcomeFromTemplate(
+    "ab", {"binaryPrice", {{"perp", "BTC"}, {"threshold", "100000"}, /* ... */}},
+    /*deployer_fee_scale=*/1);
+exchange.registerQuestionFromTemplate("ab", question, 1, {named_a, named_b});
+exchange.registerAndAssociateNamedOutcomeFromTemplate("ab", /*question=*/3, named_c);
+
+// name/description and side names must match outcomeMeta() exactly.
+exchange.settleOutcome("ab", {7, /*settle_fraction=*/1.0,
+                              {"template:abc", "expiry:...|target:100|underlying:ABC"},
+                              {"template:Over", "template:Under"}});
+exchange.settleQuestion("ab", 3, {win, lose}, {"template:abc", "expiry:20260801-1830"});
+exchange.setOutcomeSubDeployers("ab", {{"settleOutcome", "0x...", true}});
+```
+
+`outcomeMetaUpdates` streams outcome creations and settlements over the
+websocket.
 
 ### Wallet Class
 
@@ -780,12 +842,48 @@ brew install curl
 - Check that the private key matches the address
 - Ensure correct network (mainnet vs testnet)
 
+## WebSocket Transport
+
+Any request that can go to `/info` or `/exchange` can go over an open websocket
+instead. One call switches the transport; every method keeps its signature, its
+return shape and its exceptions:
+
+```cpp
+Exchange exchange(wallet, MAINNET_API_URL);
+exchange.useWebsocketTransport();
+
+exchange.order("ETH", true, 0.1, 2000.0, order_type);  // over the websocket
+exchange.info_.l2Snapshot("ETH");                      // same socket
+```
+
+`Exchange` and the `Info` it exposes as `info_` share one socket, the same way
+they already share one HTTP connection. Requests fall back to HTTP while the
+socket is down or reconnecting, so a blip costs latency rather than a failed
+order. `/explorer` requests are not supported over the socket by the server and
+stay on HTTP.
+
+For requests you do not want to wait on one at a time, the underlying manager
+takes the same payloads and returns futures:
+
+```cpp
+auto& ws = *info.websocketTransport();
+auto book = ws.post("info", json{{"type", "l2Book"}, {"coin", "ETH"}});
+auto mids = ws.post("info", json{{"type", "allMids"}});
+process(book.get(), mids.get());   // both were in flight at once
+```
+
+Waiting on one of those futures from inside a subscription callback would block
+the thread that has to deliver the reply, so the blocking path throws rather
+than hanging if you try.
+
 ## Performance Considerations
 
 - **Nonce Management**: Uses millisecond timestamps for nonces
 - **Connection Pooling**: libcurl reuses connections for efficiency
 - **Batch Operations**: Use bulk methods for multiple orders
 - **Metadata Caching**: Info class caches coin-to-asset mappings
+- **WebSocket Transport**: One socket for streaming and requests, no per-request
+  HTTP headers, and concurrent requests do not queue behind one curl handle
 
 
 ## Resources

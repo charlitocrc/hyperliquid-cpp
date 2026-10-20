@@ -429,7 +429,9 @@ struct OpenOrders {
 
 struct UserBalance {
     std::string coin;
-    int token = 0;
+    // Absent for HIP-4 outcome shares, whose coin ("+<encoding>") is the
+    // only identifier they have.
+    std::optional<int> token;
     std::string hold;
     std::string total;
     std::string entry_ntl;
@@ -468,6 +470,10 @@ struct OutcomeSpec {
     std::string name;
     std::string description;
     std::array<OutcomeSideSpec, 2> side_specs;
+    std::optional<std::string> quote_token;
+    // Deployer-created outcomes only; protocol (recurring) ones have neither.
+    std::optional<std::string> venue;
+    std::optional<std::string> deployer_fee_scale;  // decimal string, e.g. "1.0"
 };
 
 struct QuestionSpec {

@@ -11,10 +11,12 @@ set(TESTS
     multi_sig_test
     spot_token_index_test
     staking_actions_test
+    vault_and_withdraw_test
+    outcomes_test
 )
 
 if(BUILD_WEBSOCKET)
-    list(APPEND TESTS websocket_identifier_test ws_types_test)
+    list(APPEND TESTS websocket_identifier_test ws_types_test ws_post_test)
 endif()
 
 foreach(TEST ${TESTS})

@@ -1,6 +1,9 @@
 #pragma once
 
+#include <cstdint>
+#include <map>
 #include <string>
+#include <utility>
 #include <vector>
 #include <optional>
 #include <variant>
@@ -242,6 +245,41 @@ struct SpotMeta {
 struct BuilderInfo {
     std::string b;  // builder address (lowercase)
     int f;          // fee in tenths of basis points
+};
+
+/**
+ * One instantiation of a HIP-4 outcome template (see Info::outcomeTemplates()).
+ *
+ * A std::map, so keywords are unique and already in the lexicographic order
+ * the exchange requires before signing.
+ */
+struct OutcomeTemplateInstance {
+    std::string id;                                      // template id
+    std::map<std::string, std::string> keyword_to_value;  // one value per template keyword
+};
+
+/**
+ * How one HIP-4 outcome settles. name_and_description and side_names must
+ * match the outcome exactly as outcomeMeta() lists it.
+ */
+struct OutcomeSettlement {
+    int64_t outcome = 0;
+    double settle_fraction = 0.0;  // in [0, 1]; question outcomes take exactly 0 or 1
+    std::pair<std::string, std::string> name_and_description;
+    std::pair<std::string, std::string> side_names;  // {YES side, NO side}
+};
+
+/**
+ * Grant or revoke one HIP-4 sub-deployer permission.
+ *
+ * variant is one of registerStandaloneOutcomeFromTemplate,
+ * registerQuestionFromTemplate, registerAndAssociateNamedOutcomeFromTemplate,
+ * settleOutcome, settleQuestion (which authorizes Exchange::settleQuestion()).
+ */
+struct OutcomeSubDeployer {
+    std::string variant;
+    std::string user;
+    bool allowed = true;
 };
 
 /**
