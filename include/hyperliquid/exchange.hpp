@@ -11,6 +11,9 @@
 
 namespace hyperliquid {
 
+/** Unit of a trailing stop's retracement; Percent uses 1.0 for 1%. */
+enum class RetracementUnit { Percent, Price };
+
 /**
  * Exchange class for trading operations
  */
@@ -619,6 +622,25 @@ public:
      *              order's nonce to race that order.
      */
     nlohmann::json noop(std::optional<int64_t> nonce = std::nullopt);
+
+    /**
+     * Place a trailing stop. Size is rounded to the asset's lot size; price
+     * retracement and activation price are rounded to its tick size.
+     * Percent retracement uses percentage points (1.234 means 1.234%).
+     * Omit activation_px to activate immediately. All supplied numbers must
+     * be finite and positive, including after rounding.
+     * Returns the raw exchange response; inspect status for rejection.
+     */
+    nlohmann::json trailingStop(const std::string& coin, bool is_buy, double sz,
+                               double retracement, RetracementUnit unit,
+                               bool reduce_only = false,
+                               std::optional<double> activation_px = std::nullopt);
+
+    /** Claim rewards for the master account (ignores a configured vault).
+     * Returns the raw exchange response, including exchange rejections.
+     */
+    nlohmann::json claimRewards();
+
 
     /**
      * Deposit into or withdraw from a vault.

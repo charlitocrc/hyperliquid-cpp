@@ -43,9 +43,10 @@ Exchange::Exchange(std::shared_ptr<Wallet> wallet,
 // HIP-4 deployer actions belong to the deployer account, like the Python SDK's
 // spot/perp deploy actions, which it signs with no vault.
 //
-// ponytail: a plain list, a lookup table does not pay for itself at seven entries.
+// ponytail: a plain list, a lookup table does not pay for itself at this size.
 static bool actionIgnoresVault(const std::string& action_type) {
-    return action_type == "setReferrer" ||
+    return action_type == "claimRewards" ||
+           action_type == "setReferrer" ||
            action_type == "createSubAccount" ||
            action_type == "subAccountTransfer" ||
            action_type == "subAccountSpotTransfer" ||
@@ -1066,6 +1067,51 @@ nlohmann::json Exchange::tokenDelegate(const std::string& validator,
                                          is_mainnet);
 
     return postAction(action, signature, action["nonce"]);
+}
+
+nlohmann::json Exchange::trailingStop(const std::string& coin, bool is_buy, double sz,
+                                         double retracement, RetracementUnit unit,
+                                         bool reduce_only,
+                                         std::optional<double> activation_px) {
+    const auto requirePositive = [](double value) {
+        if (!std::isfinite(value) || value <= 0.0) {
+            throw std::invalid_argument("trailingStop values must be finite and positive");
+        }
+    };
+    requirePositive(sz);
+    requirePositive(retracement);
+    if (activation_px) requirePositive(*activation_px);
+    if (unit != RetracementUnit::Percent && unit != RetracementUnit::Price) {
+        throw std::invalid_argument("Invalid trailingStop retracement unit");
+    }
+    const int asset = info_.nameToAsset(coin);
+    const int decimals = szDecimalsFor(info_, asset);
+    sz = roundSize(sz, decimals);
+    requirePositive(sz);
+    if (unit == RetracementUnit::Price) {
+        retracement = roundPriceFor(retracement, asset, decimals);
+        requirePositive(retracement);
+    }
+    if (activation_px) {
+        *activation_px = roundPriceFor(*activation_px, asset, decimals);
+        requirePositive(*activation_px);
+    }
+    nlohmann::ordered_json action;
+    action["type"] = "trailingStop";
+    action["asset"] = asset;
+    action["isBuy"] = is_buy;
+    action["sz"] = floatToWire(sz);
+    action["reduceOnly"] = reduce_only;
+    action["retracement"] = unit == RetracementUnit::Percent
+        ? nlohmann::ordered_json{{"pct", floatToWire(retracement) + "%"}}
+        : nlohmann::ordered_json{{"px", floatToWire(retracement)}};
+    action["activationPx"] = activation_px
+        ? nlohmann::json(floatToWire(*activation_px)) : nlohmann::json(nullptr);
+    return postL1Action(action);
+}
+
+nlohmann::json Exchange::claimRewards() {
+    return postL1Action(nlohmann::ordered_json{{"type", "claimRewards"}});
 }
 
 nlohmann::json Exchange::noop(std::optional<int64_t> nonce) {
