@@ -165,7 +165,6 @@ std::string outcomeCoin(int64_t outcome, int side) {
 }
 
 double roundOutcomePrice(double price) {
-    // ponytail: 5 decimals inferred from live books, see the header.
     return std::round(roundPrice(price, 0, false) * 1e5) / 1e5;
 }
 

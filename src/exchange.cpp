@@ -43,7 +43,6 @@ Exchange::Exchange(std::shared_ptr<Wallet> wallet,
 // HIP-4 deployer actions belong to the deployer account, like the Python SDK's
 // spot/perp deploy actions, which it signs with no vault.
 //
-// ponytail: a plain list, a lookup table does not pay for itself at this size.
 static bool actionIgnoresVault(const std::string& action_type) {
     return action_type == "claimRewards" ||
            action_type == "setReferrer" ||

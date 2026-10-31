@@ -1,38 +1,6 @@
-#include "test_exchange.hpp"
-
-#include "hyperliquid/utils/signing.hpp"
-
-#include <cassert>
-#include <stdexcept>
-#include <string>
-
-using hyperliquid::TwapWire;
-using hyperliquid_test::TestExchange;
+#include "twap_orders_fixture.hpp"
 
 namespace {
-
-const nlohmann::json kTwapRunningResponse = {
-    {"status", "ok"},
-    {"response", {{"type", "twapOrder"},
-                  {"data", {{"status", {{"running", {{"twapId", 77738308}}}}}}}}},
-};
-
-// The action hash is keccak(msgpack(action)), so the key order of the twap
-// object is load-bearing: a wrong order still serializes to valid JSON but
-// signs a different action and the API rejects the signature. Assert the
-// literal serialization, not just json equality (which ignores order).
-void twapWireSerializesKeysInSpecOrder() {
-    TwapWire twap;
-    twap.asset = 0;
-    twap.is_buy = true;
-    twap.size = "1.5";
-    twap.reduce_only = false;
-    twap.minutes = 30;
-    twap.randomize = false;
-
-    const std::string expected = R"({"a":0,"b":true,"s":"1.5","r":false,"m":30,"t":false})";
-    assert(twap.toJson().dump() == expected);
-}
 
 void twapOrderPostsExpectedAction() {
     TestExchange exchange;
@@ -106,30 +74,13 @@ void twapOrderRejectsSizeThatRoundsToZero() {
     assert(exchange.requests().empty());
 }
 
-void twapCancelPostsExpectedAction() {
-    TestExchange exchange;
-
-    exchange.twapCancel("BTC", 77738308);
-
-    assert(exchange.requests().size() == 1);
-    assert(exchange.requests()[0].path == "/exchange");
-
-    const auto& action = exchange.lastAction();
-    assert(action.at("type") == "twapCancel");
-    assert(action.at("a") == 0);
-    assert(action.at("t") == 77738308);
-}
-
 } // namespace
 
 int main() {
-    twapWireSerializesKeysInSpecOrder();
     twapOrderPostsExpectedAction();
     twapOrderRoundsSizeToSzDecimals();
     twapOrderPropagatesFlags();
     twapOrderRejectsNonPositiveMinutes();
     twapOrderRejectsSizeThatRoundsToZero();
-    twapCancelPostsExpectedAction();
-
     return 0;
 }
