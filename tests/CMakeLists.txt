@@ -61,6 +61,8 @@ set(TESTS
     settle_outcome_test
     settle_question_test
     set_outcome_sub_deployers_test
+    spot_deploy_test
+    perp_deploy_test
 )
 
 if(BUILD_WEBSOCKET)

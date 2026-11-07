@@ -13,6 +13,7 @@
 #include "hyperliquid/utils/conversions.hpp"
 #include "hyperliquid/utils/signing.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <stdexcept>
 #include <string>
@@ -44,6 +45,24 @@ void assertSent(const TestExchange& exchange, const char* expected_json,
         with_vault ? std::optional<std::string>(vault) : std::nullopt,
         payload.at("nonce").get<int64_t>(), std::nullopt, /*is_mainnet=*/false);
     assert(payload.at("signature") == signature.toJson());
+}
+
+// Pins signL1Action() on `action_json` to the Python SDK's
+//   sign_l1_action(wallet, action, None, 1583838, None, False)
+// so assertSent() + this together tie the SDK's request to Python's.
+// Python drops leading zeros from r/s, so compare as numbers.
+void assertPythonSignature(const char* action_json, const char* r, const char* s, int v) {
+    const auto wallet = hyperliquid::Wallet::fromPrivateKey(TEST_PRIVATE_KEY);
+    const auto sig = hyperliquid::signL1Action(*wallet, nlohmann::ordered_json::parse(action_json),
+                                               std::nullopt, 1583838, std::nullopt, false)
+                         .toJson();
+    const auto strip = [](std::string hex) {
+        hex = hex.substr(2);
+        return hex.substr(std::min(hex.find_first_not_of('0'), hex.size()));
+    };
+    assert(strip(sig.at("r")) == strip(r));
+    assert(strip(sig.at("s")) == strip(s));
+    assert(sig.at("v") == v);
 }
 
 // assertSent() checks the SDK against signL1Action(); this checks

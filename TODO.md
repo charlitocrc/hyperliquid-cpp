@@ -29,17 +29,17 @@
 | Multi-Sig | ✅ | ✅ | |
 | Prediction Markets (HIP-4) | ✅ | ✅ | trading, `userOutcome`, deployer actions, queries |
 | Dex / User Abstraction | ✅ | ⚠️ | queries only |
-| Token / Perp Deployment | ✅ | ❌ | |
+| Token / Perp Deployment | ✅ | ✅ | HIP-1/2 `spotDeploy`, HIP-3 `perpDeploy` (no `insertMarginTable`) |
 | Validators | ✅ | ❌ | |
 
 ## Missing
 
 ### Exchange actions
-- [ ] `agentSendAsset()`, `sendToEvmWithData()`, `hip3LiquidatorTransfer()`, `claimRewards()`
+- [ ] `agentSendAsset()`, `sendToEvmWithData()`, `hip3LiquidatorTransfer()`
 - [ ] `userDexAbstraction()`, `agentEnableDexAbstraction()`, `userSetAbstraction()`, `agentSetAbstraction()` (queries exist, actions don't)
 - [ ] `useBigBlocks()`, `gossipPriorityBid()` (Python SDK only)
 - [ ] `marketClose()` for spot/outcome balances (reads perp positions only)
-- [ ] Spot deploy (12 `spotDeploy` variants), perp deploy (14 `perpDeploy` variants)
+- [ ] `perpDeploy` `insertMarginTable`: documented as a type but not listed in the `PerpDeployAction` enum
 - [ ] Validator ops: `cValidator*`, `cSigner*` (Python SDK only), `authorizeAqav2Role()`
 
 ### Info queries
@@ -48,6 +48,7 @@
 ### Unverified against live data
 - [ ] Outcome tick: `roundOutcomePrice()` caps at 5 decimals (inferred from live books); test a 6-decimal price on testnet
 - [ ] Outcome deployer actions: key order pinned to docs only; needs one testnet deploy
+- [ ] Deploy variants missing from the Python SDK (`enableAlignedQuoteToken`, `blacklistUsers`, `registerAsset2`, `setFundingMultipliers` and the other perpDeploy setters): key order pinned to docs only; needs one testnet deploy
 - [ ] `userOutcome` with a subaccount: sent with `vaultAddress`, unconfirmed
 - [ ] `outcomeMetaUpdates`: `outcomeSettled`/`outcomeCreated` confirmed live; `questionSettled`/`questionUpdated` unseen
 - [ ] `WsUserEvent`: only `fills`, `send`, `subAccountTransfer` seen live

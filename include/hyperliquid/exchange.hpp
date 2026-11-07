@@ -547,6 +547,134 @@ public:
     nlohmann::json setOutcomeSubDeployers(const std::string& venue,
                                           const std::vector<OutcomeSubDeployer>& changes);
 
+    // -----------------------------------------------------------------------
+    // HIP-1/HIP-2 spot token deployment ({"type": "spotDeploy", <variant>: ..})
+    //
+    // Sent in order: registerToken -> userGenesis (repeatable) -> genesis ->
+    // registerSpot -> registerHyperliquidity. Info::spotDeployState() and
+    // Info::spotPairDeployAuctionStatus() report progress and gas.
+    // Signed without a vault, like the Python SDK, so a configured
+    // vault_address is neither signed nor sent. Wei amounts are integer
+    // strings in the token's weiDecimals.
+    // -----------------------------------------------------------------------
+
+    /** Register a token, bidding up to `max_gas` (native wei) in the deploy auction. */
+    nlohmann::json spotDeployRegisterToken(const std::string& token_name,
+                                           int sz_decimals,
+                                           int wei_decimals,
+                                           int64_t max_gas,
+                                           const std::string& full_name);
+
+    /**
+     * Assign genesis balances. Repeatable until genesis.
+     * @param user_and_wei (address, wei) pairs
+     * @param existing_token_and_wei (token index, total wei) airdropped pro rata
+     *        to that token's holders
+     * @param blacklist_users (address, true to blacklist / false to remove);
+     *        omitted from the action when nullopt
+     */
+    nlohmann::json spotDeployUserGenesis(
+        int token,
+        const std::vector<std::pair<std::string, std::string>>& user_and_wei,
+        const std::vector<std::pair<int, std::string>>& existing_token_and_wei,
+        const std::optional<std::vector<std::pair<std::string, bool>>>& blacklist_users = std::nullopt);
+
+    /** Must precede genesis to be able to freeze users later. */
+    nlohmann::json spotDeployEnableFreezePrivilege(int token);
+    nlohmann::json spotDeployFreezeUser(int token, const std::string& user, bool freeze);
+    nlohmann::json spotDeployRevokeFreezePrivilege(int token);
+    nlohmann::json spotDeployEnableQuoteToken(int token);
+    nlohmann::json spotDeployEnableAlignedQuoteToken(int token);
+
+    /**
+     * Finish genesis. `max_supply` (wei string) must equal the sum of all
+     * userGenesis amounts plus hyperliquidity; it is a checksum.
+     */
+    nlohmann::json spotDeployGenesis(int token, const std::string& max_supply, bool no_hyperliquidity);
+
+    /** Create the base/quote spot pair. Also deploys pairs of two existing tokens. */
+    nlohmann::json spotDeployRegisterSpot(int base_token, int quote_token);
+
+    /**
+     * Seed the Hyperliquidity order ladder for `spot` (the pair index from
+     * registerSpot, not the token index). `n_orders` must be 0 after a
+     * no-hyperliquidity genesis.
+     */
+    nlohmann::json spotDeployRegisterHyperliquidity(int spot,
+                                                    double start_px,
+                                                    double order_sz,
+                                                    int n_orders,
+                                                    std::optional<int> n_seeded_levels = std::nullopt);
+
+    /** `share` is a percent string, "0%" to "100%"; it can only decrease. */
+    nlohmann::json spotDeploySetDeployerTradingFeeShare(int token, const std::string& share);
+
+    // -----------------------------------------------------------------------
+    // HIP-3 builder-deployed perp dexs ({"type": "perpDeploy", <variant>: ..})
+    //
+    // Coins are dex-prefixed ("mydex:BTC") wherever the action names a coin.
+    // Coin-keyed maps are std::maps, so they are already in the sorted order
+    // the exchange requires before signing. Signed without a vault.
+    // Info::queryPerpDeployAuctionStatus() reports the auction.
+    // -----------------------------------------------------------------------
+
+    /**
+     * Register an asset on `dex`. Pass `schema` on the dex's first asset to
+     * create the dex; nullopt after that.
+     * @param max_gas Native wei bid; nullopt uses the current auction price
+     * @param oracle_px Initial oracle price as a decimal string
+     */
+    nlohmann::json perpDeployRegisterAsset(const std::string& dex,
+                                           std::optional<int64_t> max_gas,
+                                           const std::string& coin,
+                                           int sz_decimals,
+                                           const std::string& oracle_px,
+                                           int margin_table_id,
+                                           bool only_isolated,
+                                           const std::optional<PerpDexSchema>& schema = std::nullopt);
+
+    /**
+     * Same as perpDeployRegisterAsset with a margin mode instead of
+     * only_isolated: "strictIsolated" (isolated margin cannot be withdrawn
+     * from open positions) or "noCross".
+     */
+    nlohmann::json perpDeployRegisterAsset2(const std::string& dex,
+                                            std::optional<int64_t> max_gas,
+                                            const std::string& coin,
+                                            int sz_decimals,
+                                            const std::string& oracle_px,
+                                            int margin_table_id,
+                                            const std::string& margin_mode,
+                                            const std::optional<PerpDexSchema>& schema = std::nullopt);
+
+    /**
+     * Push oracle and mark prices. At least 2.5s apart; deployers are
+     * expected to call it every ~3s even with no changes.
+     * @param all_mark_pxs 0, 1 or 2 mark price sets, medianed with the local mark
+     * @param external_perp_pxs Must cover every asset of the dex
+     */
+    nlohmann::json perpDeploySetOracle(const std::string& dex,
+                                       const std::map<std::string, std::string>& oracle_pxs,
+                                       const std::vector<std::map<std::string, std::string>>& all_mark_pxs,
+                                       const std::map<std::string, std::string>& external_perp_pxs);
+
+    /** coin -> funding multiplier decimal string in [0, 10]. */
+    nlohmann::json perpDeploySetFundingMultipliers(const std::map<std::string, std::string>& multipliers);
+    nlohmann::json perpDeployHaltTrading(const std::string& coin, bool is_halted);
+    /** coin -> non-zero margin table id. */
+    nlohmann::json perpDeploySetMarginTableIds(const std::map<std::string, int>& margin_table_ids);
+    nlohmann::json perpDeploySetFeeRecipient(const std::string& dex, const std::string& fee_recipient);
+    /** coin -> notional open interest cap. */
+    nlohmann::json perpDeploySetOpenInterestCaps(const std::map<std::string, int64_t>& caps);
+    nlohmann::json perpDeploySetSubDeployers(const std::string& dex,
+                                             const std::vector<PerpSubDeployer>& changes);
+    /** coin -> "strictIsolated" | "noCross". */
+    nlohmann::json perpDeploySetMarginModes(const std::map<std::string, std::string>& margin_modes);
+    /** `scale` is a decimal string in ["0.0", "3.0"]; mainnet allows one change per 30 days. */
+    nlohmann::json perpDeploySetFeeScale(const std::string& dex, const std::string& scale);
+    /** coin -> growth mode on/off; each coin can change once per 30 days. */
+    nlohmann::json perpDeploySetGrowthModes(const std::map<std::string, bool>& growth_modes);
+
     /**
      * Update leverage for a coin
      */
@@ -734,6 +862,9 @@ private:
     nlohmann::json postOutcomeDeploy(const std::string& venue,
                                      const char* variant,
                                      nlohmann::ordered_json body);
+
+    // Wraps one spotDeploy / perpDeploy variant: {"type": type, variant: body}.
+    nlohmann::json postDeploy(const char* type, const char* variant, nlohmann::ordered_json body);
 
     double slippagePrice(const std::string& name,
                         bool is_buy,

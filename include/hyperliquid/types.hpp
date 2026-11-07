@@ -283,6 +283,22 @@ struct OutcomeSubDeployer {
 };
 
 /**
+ * HIP-3 sub-deployers use the same shape; variant names a perpDeploy variant
+ * instead, e.g. "haltTrading" or "setOracle".
+ */
+using PerpSubDeployer = OutcomeSubDeployer;
+
+/**
+ * Parameters of a new HIP-3 perp dex, passed with the dex's first
+ * registerAsset. oracle_updater defaults to the deployer when absent.
+ */
+struct PerpDexSchema {
+    std::string full_name;
+    int collateral_token = 0;  // spot token index
+    std::optional<std::string> oracle_updater;
+};
+
+/**
  * EIP-712 type definition
  */
 struct EIP712Type {

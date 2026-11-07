@@ -40,8 +40,9 @@ Exchange::Exchange(std::shared_ptr<Wallet> wallet,
 // be a second, contradictory one. The Python SDK signs it with no vault and
 // sends it with one, same mismatch as below.
 //
-// HIP-4 deployer actions belong to the deployer account, like the Python SDK's
-// spot/perp deploy actions, which it signs with no vault.
+// Deployer actions (HIP-1/2 spotDeploy, HIP-3 perpDeploy, HIP-4 outcomes)
+// belong to the deployer account; the Python SDK signs spot/perp deploys with
+// no vault.
 //
 static bool actionIgnoresVault(const std::string& action_type) {
     return action_type == "claimRewards" ||
@@ -51,7 +52,9 @@ static bool actionIgnoresVault(const std::string& action_type) {
            action_type == "subAccountSpotTransfer" ||
            action_type == "vaultTransfer" ||
            action_type == "activateOutcomeDeployer" ||
-           action_type == "outcomeDeploy";
+           action_type == "outcomeDeploy" ||
+           action_type == "spotDeploy" ||
+           action_type == "perpDeploy";
 }
 
 // Lot size. Outcomes are listed in no meta response and trade whole shares, so
@@ -873,6 +876,288 @@ nlohmann::json Exchange::setOutcomeSubDeployers(const std::string& venue,
         body.push_back(std::move(entry));
     }
     return postOutcomeDeploy(venue, "setSubDeployers", std::move(body));
+}
+
+// --- HIP-1/2 spot and HIP-3 perp deployment --------------------------------
+//
+// Field order follows the Python SDK where it has the action, the docs
+// otherwise: it is what gets msgpack-hashed for the signature.
+
+nlohmann::json Exchange::postDeploy(const char* type, const char* variant, nlohmann::ordered_json body) {
+    nlohmann::ordered_json action;
+    action["type"] = type;
+    action[variant] = std::move(body);
+    return postL1Action(action);
+}
+
+// [[k, v], ...] in key order, which std::map already guarantees.
+template <typename V>
+static nlohmann::ordered_json sortedPairs(const std::map<std::string, V>& m) {
+    nlohmann::ordered_json out = nlohmann::ordered_json::array();
+    for (const auto& [k, v] : m) {
+        out.push_back(nlohmann::ordered_json::array({k, v}));
+    }
+    return out;
+}
+
+static nlohmann::ordered_json tokenBody(int token) {
+    nlohmann::ordered_json body;
+    body["token"] = token;
+    return body;
+}
+
+nlohmann::json Exchange::spotDeployRegisterToken(const std::string& token_name,
+                                                 int sz_decimals,
+                                                 int wei_decimals,
+                                                 int64_t max_gas,
+                                                 const std::string& full_name) {
+    nlohmann::ordered_json spec;
+    spec["name"] = token_name;
+    spec["szDecimals"] = sz_decimals;
+    spec["weiDecimals"] = wei_decimals;
+
+    nlohmann::ordered_json body;
+    body["spec"] = std::move(spec);
+    body["maxGas"] = max_gas;
+    body["fullName"] = full_name;
+    return postDeploy("spotDeploy", "registerToken2", std::move(body));
+}
+
+nlohmann::json Exchange::spotDeployUserGenesis(
+    int token,
+    const std::vector<std::pair<std::string, std::string>>& user_and_wei,
+    const std::vector<std::pair<int, std::string>>& existing_token_and_wei,
+    const std::optional<std::vector<std::pair<std::string, bool>>>& blacklist_users) {
+    nlohmann::ordered_json users = nlohmann::ordered_json::array();
+    for (const auto& [user, wei] : user_and_wei) {
+        users.push_back(nlohmann::ordered_json::array({normalizeAddress(user), wei}));
+    }
+    nlohmann::ordered_json existing = nlohmann::ordered_json::array();
+    for (const auto& [existing_token, wei] : existing_token_and_wei) {
+        existing.push_back(nlohmann::ordered_json::array({existing_token, wei}));
+    }
+
+    nlohmann::ordered_json body;
+    body["token"] = token;
+    body["userAndWei"] = std::move(users);
+    body["existingTokenAndWei"] = std::move(existing);
+    if (blacklist_users.has_value()) {
+        nlohmann::ordered_json blacklist = nlohmann::ordered_json::array();
+        for (const auto& [user, blacklisted] : *blacklist_users) {
+            blacklist.push_back(nlohmann::ordered_json::array({normalizeAddress(user), blacklisted}));
+        }
+        body["blacklistUsers"] = std::move(blacklist);
+    }
+    return postDeploy("spotDeploy", "userGenesis", std::move(body));
+}
+
+nlohmann::json Exchange::spotDeployEnableFreezePrivilege(int token) {
+    return postDeploy("spotDeploy", "enableFreezePrivilege", tokenBody(token));
+}
+
+nlohmann::json Exchange::spotDeployFreezeUser(int token, const std::string& user, bool freeze) {
+    auto body = tokenBody(token);
+    body["user"] = normalizeAddress(user);
+    body["freeze"] = freeze;
+    return postDeploy("spotDeploy", "freezeUser", std::move(body));
+}
+
+nlohmann::json Exchange::spotDeployRevokeFreezePrivilege(int token) {
+    return postDeploy("spotDeploy", "revokeFreezePrivilege", tokenBody(token));
+}
+
+nlohmann::json Exchange::spotDeployEnableQuoteToken(int token) {
+    return postDeploy("spotDeploy", "enableQuoteToken", tokenBody(token));
+}
+
+nlohmann::json Exchange::spotDeployEnableAlignedQuoteToken(int token) {
+    return postDeploy("spotDeploy", "enableAlignedQuoteToken", tokenBody(token));
+}
+
+nlohmann::json Exchange::spotDeployGenesis(int token, const std::string& max_supply, bool no_hyperliquidity) {
+    auto body = tokenBody(token);
+    body["maxSupply"] = max_supply;
+    if (no_hyperliquidity) {
+        body["noHyperliquidity"] = true;  // omitted, not false, like the Python SDK
+    }
+    return postDeploy("spotDeploy", "genesis", std::move(body));
+}
+
+nlohmann::json Exchange::spotDeployRegisterSpot(int base_token, int quote_token) {
+    nlohmann::ordered_json body;
+    body["tokens"] = nlohmann::ordered_json::array({base_token, quote_token});
+    return postDeploy("spotDeploy", "registerSpot", std::move(body));
+}
+
+// ponytail: prices go through floatToWire ("1" for 1.0), not Python's str()
+// ("1.0"); both parse to the same decimal on the exchange.
+nlohmann::json Exchange::spotDeployRegisterHyperliquidity(int spot,
+                                                          double start_px,
+                                                          double order_sz,
+                                                          int n_orders,
+                                                          std::optional<int> n_seeded_levels) {
+    nlohmann::ordered_json body;
+    body["spot"] = spot;
+    body["startPx"] = floatToWire(start_px);
+    body["orderSz"] = floatToWire(order_sz);
+    body["nOrders"] = n_orders;
+    if (n_seeded_levels.has_value()) {
+        body["nSeededLevels"] = *n_seeded_levels;
+    }
+    return postDeploy("spotDeploy", "registerHyperliquidity", std::move(body));
+}
+
+nlohmann::json Exchange::spotDeploySetDeployerTradingFeeShare(int token, const std::string& share) {
+    auto body = tokenBody(token);
+    body["share"] = share;
+    return postDeploy("spotDeploy", "setDeployerTradingFeeShare", std::move(body));
+}
+
+// {"maxGas", "assetRequest", "dex", "schema"}; registerAsset and
+// registerAsset2 differ only in the request's last field.
+static nlohmann::ordered_json registerAssetBody(const std::string& dex,
+                                                std::optional<int64_t> max_gas,
+                                                nlohmann::ordered_json asset_request,
+                                                const std::optional<PerpDexSchema>& schema) {
+    if (dex.empty()) {
+        throw std::invalid_argument("perp deploy requires a dex name");
+    }
+
+    nlohmann::ordered_json schema_wire = nullptr;
+    if (schema.has_value()) {
+        schema_wire = nlohmann::ordered_json::object();
+        schema_wire["fullName"] = schema->full_name;
+        schema_wire["collateralToken"] = schema->collateral_token;
+        schema_wire["oracleUpdater"] = schema->oracle_updater.has_value()
+            ? nlohmann::ordered_json(normalizeAddress(*schema->oracle_updater))
+            : nlohmann::ordered_json(nullptr);
+    }
+
+    nlohmann::ordered_json body;
+    body["maxGas"] = max_gas.has_value() ? nlohmann::ordered_json(*max_gas) : nlohmann::ordered_json(nullptr);
+    body["assetRequest"] = std::move(asset_request);
+    body["dex"] = dex;
+    body["schema"] = std::move(schema_wire);
+    return body;
+}
+
+static nlohmann::ordered_json assetRequestBase(const std::string& coin,
+                                               int sz_decimals,
+                                               const std::string& oracle_px,
+                                               int margin_table_id) {
+    nlohmann::ordered_json request;
+    request["coin"] = coin;
+    request["szDecimals"] = sz_decimals;
+    request["oraclePx"] = oracle_px;
+    request["marginTableId"] = margin_table_id;
+    return request;
+}
+
+nlohmann::json Exchange::perpDeployRegisterAsset(const std::string& dex,
+                                                 std::optional<int64_t> max_gas,
+                                                 const std::string& coin,
+                                                 int sz_decimals,
+                                                 const std::string& oracle_px,
+                                                 int margin_table_id,
+                                                 bool only_isolated,
+                                                 const std::optional<PerpDexSchema>& schema) {
+    auto request = assetRequestBase(coin, sz_decimals, oracle_px, margin_table_id);
+    request["onlyIsolated"] = only_isolated;
+    return postDeploy("perpDeploy", "registerAsset",
+                      registerAssetBody(dex, max_gas, std::move(request), schema));
+}
+
+nlohmann::json Exchange::perpDeployRegisterAsset2(const std::string& dex,
+                                                  std::optional<int64_t> max_gas,
+                                                  const std::string& coin,
+                                                  int sz_decimals,
+                                                  const std::string& oracle_px,
+                                                  int margin_table_id,
+                                                  const std::string& margin_mode,
+                                                  const std::optional<PerpDexSchema>& schema) {
+    auto request = assetRequestBase(coin, sz_decimals, oracle_px, margin_table_id);
+    request["marginMode"] = margin_mode;
+    return postDeploy("perpDeploy", "registerAsset2",
+                      registerAssetBody(dex, max_gas, std::move(request), schema));
+}
+
+nlohmann::json Exchange::perpDeploySetOracle(const std::string& dex,
+                                             const std::map<std::string, std::string>& oracle_pxs,
+                                             const std::vector<std::map<std::string, std::string>>& all_mark_pxs,
+                                             const std::map<std::string, std::string>& external_perp_pxs) {
+    nlohmann::ordered_json mark_pxs = nlohmann::ordered_json::array();
+    for (const auto& pxs : all_mark_pxs) {
+        mark_pxs.push_back(sortedPairs(pxs));
+    }
+
+    nlohmann::ordered_json body;
+    body["dex"] = dex;
+    body["oraclePxs"] = sortedPairs(oracle_pxs);
+    body["markPxs"] = std::move(mark_pxs);
+    body["externalPerpPxs"] = sortedPairs(external_perp_pxs);
+    return postDeploy("perpDeploy", "setOracle", std::move(body));
+}
+
+nlohmann::json Exchange::perpDeploySetFundingMultipliers(const std::map<std::string, std::string>& multipliers) {
+    return postDeploy("perpDeploy", "setFundingMultipliers", sortedPairs(multipliers));
+}
+
+nlohmann::json Exchange::perpDeployHaltTrading(const std::string& coin, bool is_halted) {
+    nlohmann::ordered_json body;
+    body["coin"] = coin;
+    body["isHalted"] = is_halted;
+    return postDeploy("perpDeploy", "haltTrading", std::move(body));
+}
+
+nlohmann::json Exchange::perpDeploySetMarginTableIds(const std::map<std::string, int>& margin_table_ids) {
+    return postDeploy("perpDeploy", "setMarginTableIds", sortedPairs(margin_table_ids));
+}
+
+nlohmann::json Exchange::perpDeploySetFeeRecipient(const std::string& dex, const std::string& fee_recipient) {
+    nlohmann::ordered_json body;
+    body["dex"] = dex;
+    body["feeRecipient"] = normalizeAddress(fee_recipient);
+    return postDeploy("perpDeploy", "setFeeRecipient", std::move(body));
+}
+
+nlohmann::json Exchange::perpDeploySetOpenInterestCaps(const std::map<std::string, int64_t>& caps) {
+    return postDeploy("perpDeploy", "setOpenInterestCaps", sortedPairs(caps));
+}
+
+nlohmann::json Exchange::perpDeploySetSubDeployers(const std::string& dex,
+                                                   const std::vector<PerpSubDeployer>& changes) {
+    if (changes.empty()) {
+        throw std::invalid_argument("perpDeploySetSubDeployers requires at least one change");
+    }
+
+    nlohmann::ordered_json sub_deployers = nlohmann::ordered_json::array();
+    for (const auto& change : changes) {
+        nlohmann::ordered_json entry;
+        entry["variant"] = change.variant;
+        entry["user"] = normalizeAddress(change.user);
+        entry["allowed"] = change.allowed;
+        sub_deployers.push_back(std::move(entry));
+    }
+
+    nlohmann::ordered_json body;
+    body["dex"] = dex;
+    body["subDeployers"] = std::move(sub_deployers);
+    return postDeploy("perpDeploy", "setSubDeployers", std::move(body));
+}
+
+nlohmann::json Exchange::perpDeploySetMarginModes(const std::map<std::string, std::string>& margin_modes) {
+    return postDeploy("perpDeploy", "setMarginModes", sortedPairs(margin_modes));
+}
+
+nlohmann::json Exchange::perpDeploySetFeeScale(const std::string& dex, const std::string& scale) {
+    nlohmann::ordered_json body;
+    body["dex"] = dex;
+    body["scale"] = scale;
+    return postDeploy("perpDeploy", "setFeeScale", std::move(body));
+}
+
+nlohmann::json Exchange::perpDeploySetGrowthModes(const std::map<std::string, bool>& growth_modes) {
+    return postDeploy("perpDeploy", "setGrowthModes", sortedPairs(growth_modes));
 }
 
 nlohmann::json Exchange::updateLeverage(int leverage,
